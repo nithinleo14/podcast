@@ -1,0 +1,35 @@
+# Pulse Studio - Frontend Rules
+
+## Tech Stack
+- **React 18** (Vite)
+- **TypeScript**
+- **Tailwind CSS**
+- **Framer Motion** (for animations)
+- **Lucide React** (for icons)
+
+## Architecture
+- **Pure Client-Side**: This application runs entirely in the browser. It does not have a backend.
+- **External APIs**: All LLM and TTS calls are made directly from the browser using standard `fetch` or SDKs (`@google/genai`).
+- **Local Storage**: State (topics, config) is persisted in `localStorage`.
+
+## Code Organization
+- `src/components/`: Reusable UI components.
+- `src/lib/`: Utility functions and API service calls (e.g., `podcastService.ts`).
+- `src/hooks/`: Custom React hooks.
+- `src/types/`: Shared TypeScript interfaces.
+
+## UI/UX Guidelines
+- Use Tailwind utility classes for all styling.
+- Follow the existing dark/light theme CSS variables defined in `index.css`.
+- Ensure all interactive elements have hover/active states.
+- Use `lucide-react` for all icons. Do not use emojis for UI controls unless it's user-generated content.
+- Maintain responsive design (mobile-first approach).
+
+## State Management
+- Use React hooks (`useState`, `useEffect`, `useRef`).
+- Avoid complex state management libraries (Redux, Zustand) unless absolutely necessary. Keep it simple.
+
+## Refactoring Rules
+- Keep components small and focused.
+- Extract complex logic into custom hooks.
+- Do not change existing functionalities when refactoring.
