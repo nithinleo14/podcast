@@ -1,0 +1,5 @@
+{
+  "name": "DailyPod AI",
+  "description": "Automated daily morning news podcast generator with free Gemini AI voices.",
+  "requestFramePermissions": []
+}
