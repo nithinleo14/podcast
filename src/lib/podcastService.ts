@@ -160,12 +160,194 @@ ${script}`;
       mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000'
     };
   } else if (config.voiceGeneratorProvider === 'elevenlabs') {
-    // Placeholder for ElevenLabs - requires specific voice IDs
-    throw new Error("ElevenLabs integration coming soon. Please use Gemini TTS for now.");
+    // ElevenLabs: generate audio per host line and concatenate
+    const key = config.elevenLabsKey;
+    if (!key) throw new Error("ElevenLabs API Key is missing. Please add it in Settings.");
+
+    const hosts = config.hosts.slice(0, config.numHosts);
+    const lines = script.split('\n').map(l => l.trim()).filter(Boolean);
+    const segments: { voiceId: string; text: string }[] = [];
+
+    for (const line of lines) {
+      for (const host of hosts) {
+        if (line.startsWith(host.name + ':')) {
+          const text = line.slice(host.name.length + 1).trim();
+          const voiceId = host.elevenLabsVoice;
+          if (!voiceId) throw new Error(`ElevenLabs Voice ID missing for host "${host.name}". Please add it in Settings → Voices.`);
+          if (text.length > 2) segments.push({ voiceId, text });
+          break;
+        }
+      }
+    }
+
+    if (!segments.length) throw new Error('Could not parse any dialogue from script. Check host names match exactly.');
+
+    const chunks: ArrayBuffer[] = [];
+    for (const seg of segments) {
+      const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${seg.voiceId}`, {
+        method: 'POST',
+        headers: {
+          'xi-api-key': key,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg'
+        },
+        body: JSON.stringify({
+          text: seg.text,
+          model_id: 'eleven_multilingual_v2',
+          voice_settings: { stability: 0.5, similarity_boost: 0.82, style: 0.3, use_speaker_boost: true }
+        })
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`ElevenLabs Error: ${errText.slice(0, 200)}`);
+      }
+      chunks.push(await res.arrayBuffer());
+    }
+
+    // Combine all MP3 chunks into a single base64 string
+    const totalLen = chunks.reduce((s, c) => s + c.byteLength, 0);
+    const combined = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(new Uint8Array(chunk), offset);
+      offset += chunk.byteLength;
+    }
+    const base64 = btoa(String.fromCharCode(...combined));
+    return { data: base64, mimeType: 'audio/mpeg' };
+
   } else if (config.voiceGeneratorProvider === 'murf') {
-    throw new Error("Murf.ai integration coming soon. Please use Gemini TTS for now.");
+    // Murf.ai: single-speaker TTS using their REST API
+    const key = config.murfKey;
+    if (!key) throw new Error("Murf API Key is missing. Please add it in Settings.");
+
+    const hosts = config.hosts.slice(0, config.numHosts);
+
+    // Parse lines per host and pick voice
+    const lines = script.split('\n').map(l => l.trim()).filter(Boolean);
+    const segments: { voiceId: string; text: string }[] = [];
+
+    for (const line of lines) {
+      for (const host of hosts) {
+        if (line.startsWith(host.name + ':')) {
+          const text = line.slice(host.name.length + 1).trim();
+          const voiceId = host.murfVoice || 'en-IN-rohan'; // default Indian English voice
+          if (text.length > 2) segments.push({ voiceId, text });
+          break;
+        }
+      }
+    }
+
+    if (!segments.length) throw new Error('Could not parse dialogue from script for Murf TTS.');
+
+    const chunks: ArrayBuffer[] = [];
+    for (const seg of segments) {
+      const res = await fetch('https://api.murf.ai/v1/speech/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': key
+        },
+        body: JSON.stringify({
+          voiceId: seg.voiceId,
+          text: seg.text,
+          format: 'MP3',
+          sampleRate: 24000,
+          channelType: 'MONO'
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Murf Error: ${errText.slice(0, 200)}`);
+      }
+
+      const data = await res.json();
+      // Murf returns an audioFile URL — fetch and convert
+      if (!data.audioFile) throw new Error('Murf returned no audio URL.');
+      const audioRes = await fetch(data.audioFile);
+      if (!audioRes.ok) throw new Error('Failed to download Murf audio file.');
+      chunks.push(await audioRes.arrayBuffer());
+    }
+
+    const totalLen = chunks.reduce((s, c) => s + c.byteLength, 0);
+    const combined = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(new Uint8Array(chunk), offset);
+      offset += chunk.byteLength;
+    }
+    const base64 = btoa(String.fromCharCode(...combined));
+    return { data: base64, mimeType: 'audio/mpeg' };
+
   } else if (config.voiceGeneratorProvider === 'audixa') {
-    throw new Error("Audixa.ai integration coming soon. Please use Gemini TTS for now.");
+    // Audixa.ai: REST TTS API — generates per-segment audio
+    const key = config.audixaKey;
+    if (!key) throw new Error("Audixa API Key is missing. Please add it in Settings.");
+
+    const hosts = config.hosts.slice(0, config.numHosts);
+    const lines = script.split('\n').map(l => l.trim()).filter(Boolean);
+    const segments: { voiceId: string; text: string }[] = [];
+
+    for (const line of lines) {
+      for (const host of hosts) {
+        if (line.startsWith(host.name + ':')) {
+          const text = line.slice(host.name.length + 1).trim();
+          const voiceId = host.audixaVoice;
+          if (!voiceId) throw new Error(`Audixa Voice ID missing for host "${host.name}". Please add it in Settings → Voices.`);
+          if (text.length > 2) segments.push({ voiceId, text });
+          break;
+        }
+      }
+    }
+
+    if (!segments.length) throw new Error('Could not parse dialogue from script for Audixa TTS.');
+
+    const chunks: ArrayBuffer[] = [];
+    for (const seg of segments) {
+      const res = await fetch('https://api.audixa.ai/v1/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${key}`
+        },
+        body: JSON.stringify({
+          voice_id: seg.voiceId,
+          text: seg.text,
+          output_format: 'mp3'
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Audixa Error: ${errText.slice(0, 200)}`);
+      }
+
+      // Audixa may return raw audio bytes or JSON with base64
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        // Try common response shapes: data.audio, data.audio_content, data.result
+        const b64 = data.audio || data.audio_content || data.result || data.data;
+        if (!b64) throw new Error('Audixa returned JSON but no recognisable audio field.');
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        chunks.push(bytes.buffer);
+      } else {
+        // Raw audio bytes
+        chunks.push(await res.arrayBuffer());
+      }
+    }
+
+    const totalLen = chunks.reduce((s, c) => s + c.byteLength, 0);
+    const combined = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(new Uint8Array(chunk), offset);
+      offset += chunk.byteLength;
+    }
+    const base64 = btoa(String.fromCharCode(...combined));
+    return { data: base64, mimeType: 'audio/mpeg' };
   }
   
   throw new Error("Unsupported voice generator provider");
