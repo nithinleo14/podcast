@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { PodcastConfig } from '../types';
-import { DEFAULT_CONFIG } from '../constants';
+import { DEFAULT_CONFIG } from '../lib/constants';
 
 export function usePodcastConfig() {
   const [config, setConfig] = useState<PodcastConfig>(() => {

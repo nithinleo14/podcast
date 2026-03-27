@@ -11,7 +11,8 @@ import {
   Volume2, 
   Search, 
   PenTool, 
-  Mic 
+  Mic,
+  Play 
 } from 'lucide-react';
 import { PodcastConfig } from '../types';
 

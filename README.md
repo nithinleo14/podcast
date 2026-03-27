@@ -1,55 +1,61 @@
-# Pulse Studio 🎙️
+# 🎙️ Pulse Studio: Your Personal AI Podcast Production Suite
 
-Your personal AI-powered podcast studio that runs entirely in your browser. Pulse Studio fetches the latest news on your favorite topics, writes a conversational script, and generates an audio podcast—all automatically.
+**Pulse Studio** is a high-efficiency news consumption tool that automates the entire podcast production workflow. From researching trending topics to writing conversational scripts and generating high-quality multi-host audio, Pulse Studio provides a professional morning radio show experience personalized to your interests.
 
-## Features
-- **Multi-LLM Support**: Use Groq, Gemini, Claude, OpenAI, or your own custom endpoints.
-- **Multi-Host Audio**: Generate podcasts with up to 3 distinct AI hosts.
-- **WhatsApp Integration**: Automatically get a text summary sent to your WhatsApp via CallMeBot or Webhooks.
-- **Full Automation**: Trigger daily generations using MacroDroid, Tasker, iOS Shortcuts, or PWA reminders.
-- **Privacy First**: All API keys and settings are stored locally in your browser.
+## 🚀 Key Features
 
-## Getting Started
+- **Multi-Agent AI Workflow:** 
+  - **News Researcher:** Scrapes and summarizes the latest news based on your topics.
+  - **Script Writer:** Transforms raw news into an engaging script for multiple hosts.
+  - **Voice Generator:** Produces natural-sounding audio with distinct personalities.
+- **Personalization:**
+  - **Custom Topics:** Add, enable/disable, and prioritize topics.
+  - **Host Personalities:** Choose from different voices and names for your hosts.
+  - **User Context:** The AI addresses you by name and follows your instructions.
+- **Multi-Provider Support:**
+  - **LLM Providers:** Groq (Llama 3), Gemini (Flash/Pro), Claude, OpenAI.
+  - **TTS Providers:** Gemini TTS (Multi-speaker), ElevenLabs, Murf, Audixa.
+  - **Custom API Integration:** Add any OpenAI-compatible or custom REST API provider.
+- **Automation & Integration:**
+  - **PWA Support:** Install as a mobile app with scheduled reminders.
+  - **MacroDroid/Tasker Integration:** Trigger generation via local automation apps.
+  - **WhatsApp Integration:** Automatically send a text summary of the podcast.
+  - **Auto-Download:** Automatically save the generated MP3 to your device.
 
-### Prerequisites
-- Node.js (v18+)
-- npm or yarn
+## 🛠️ Getting Started
 
-### Installation
-1. Clone the repository.
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the development server:
-   ```bash
-   npm run dev
-   ```
+### 1. Configure Your AI Providers
+Go to the **Settings** tab and enter your API keys for the providers you want to use.
+- **Gemini API Key:** Required for the default voice generation and Gemini LLM models.
+- **Groq API Key:** Recommended for fast and high-quality news fetching and script writing.
 
-### Configuration
-1. Open the app in your browser.
-2. Navigate to the **Settings** tab.
-3. Enter your API keys for the providers you wish to use (e.g., Gemini, Groq).
-4. Configure your hosts and personalization settings.
+### 2. Set Your Topics
+In the **Topics** tab, enable the topics you're interested in or add your own custom topics. You can also adjust the weightage (percentage) of each topic.
 
-## Automation Guide
-Pulse Studio is designed to be automated. You can trigger a generation silently by opening the app with the `?auto=1` query parameter.
+### 3. Generate Your First Podcast
+Go to the **Generate** tab, set your desired duration, and click **Generate Podcast**. You can follow the progress of the AI agents in the real-time logs.
+
+### 4. Listen and Share
+Once generated, you can listen to the podcast directly in the app, download the MP3, or send a summary to WhatsApp.
+
+## 📱 Automation Setup
+
+Pulse Studio is designed to work seamlessly with mobile automation tools like **MacroDroid** or **Tasker**. 
 
 ### Using MacroDroid (Android)
-1. Download the Automation HTML file from the **Automate** tab.
-2. In MacroDroid, create a macro that triggers at your desired time.
-3. Add the action: `Open Website / HTTP GET` and point it to the local HTML file or your hosted URL with `?auto=1`.
-4. Ensure "Auto-Generate on Launch" is enabled in Pulse Studio settings.
+1. Download the **Automation HTML** file from the **Guide** tab.
+2. In MacroDroid, create a macro with a **Time of Day** trigger.
+3. Add an **Open Website** action and select the downloaded HTML file.
+4. This will automatically open Pulse Studio and start the generation process at the scheduled time.
 
-### WhatsApp "Send to Me"
-1. Get an API key from `@CallMeBot_WhatsApp` on Telegram/WhatsApp.
-2. In Settings > WhatsApp Integration, select **CallMeBot**.
-3. Enter your API key and phone number.
-4. Enable Auto-Send in the Automate tab.
+## 🏗️ Project Structure
 
-## Tech Stack
-- React 18
-- Vite
-- Tailwind CSS
-- Framer Motion
-- Google Gen AI SDK
+- `src/App.tsx`: Main application component and state management.
+- `src/components/`: Modular UI components (Header, Navigation, Panels, etc.).
+- `src/lib/`: Core logic, constants, and AI service abstractions.
+- `src/types/`: TypeScript interfaces and type definitions.
+- `src/hooks/`: Custom React hooks for state persistence.
+
+## 📄 License
+
+This project is licensed under the MIT License.

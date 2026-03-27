@@ -1,6 +1,7 @@
+import React from 'react';
 import { Reorder, useDragControls } from 'motion/react';
 import { GripVertical, Trash2, CheckCircle } from 'lucide-react';
-import { Topic } from '../lib/podcastService';
+import { Topic } from '../types';
 
 export interface TopicItemProps {
   topic: Topic;
@@ -10,7 +11,7 @@ export interface TopicItemProps {
   pctMode: boolean;
 }
 
-export function TopicItem({ topic, index, topics, setTopics, pctMode }: TopicItemProps) {
+export const TopicItem: React.FC<TopicItemProps> = ({ topic, index, topics, setTopics, pctMode }) => {
   const dragControls = useDragControls();
   return (
     <Reorder.Item 

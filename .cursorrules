@@ -1,35 +1,29 @@
-# Pulse Studio - Frontend Rules
+# Pulse Studio - AI Assistant Rules
 
-## Tech Stack
-- **React 18** (Vite)
-- **TypeScript**
-- **Tailwind CSS**
-- **Framer Motion** (for animations)
-- **Lucide React** (for icons)
+## General Principles
+- **Maintain Modularity:** Keep UI components in `src/components/` and core logic in `src/lib/`.
+- **Type Safety:** Always use TypeScript interfaces and types defined in `src/types/index.ts`.
+- **State Management:** Use React hooks (`useState`, `useEffect`) and custom hooks in `src/hooks/` for state persistence.
+- **Styling:** Use Tailwind CSS utility classes for all styling. Follow the established design patterns.
+- **AI Integration:** Use the `callLLM` and `generatePodcastAudio` services in `src/lib/podcastService.ts` for all AI interactions.
 
-## Architecture
-- **Pure Client-Side**: This application runs entirely in the browser. It does not have a backend.
-- **External APIs**: All LLM and TTS calls are made directly from the browser using standard `fetch` or SDKs (`@google/genai`).
-- **Local Storage**: State (topics, config) is persisted in `localStorage`.
+## Component Guidelines
+- **Functional Components:** Use functional components with React hooks.
+- **Props Interfaces:** Always define an interface for component props.
+- **Lucide Icons:** Use `lucide-react` for all icons.
+- **Motion Animations:** Use `motion` from `motion/react` for animations and transitions.
 
-## Code Organization
-- `src/components/`: Reusable UI components.
-- `src/lib/`: Utility functions and API service calls (e.g., `podcastService.ts`).
-- `src/hooks/`: Custom React hooks.
-- `src/types/`: Shared TypeScript interfaces.
+## Logic & Services
+- **Prompt Management:** Centralize all AI prompts in `src/lib/prompts.ts`.
+- **Utility Functions:** Keep general-purpose utility functions in `src/lib/utils.ts`.
+- **Constants:** Use `src/lib/constants.ts` for all application-wide constants and default values.
 
-## UI/UX Guidelines
-- Use Tailwind utility classes for all styling.
-- Follow the existing dark/light theme CSS variables defined in `index.css`.
-- Ensure all interactive elements have hover/active states.
-- Use `lucide-react` for all icons. Do not use emojis for UI controls unless it's user-generated content.
-- Maintain responsive design (mobile-first approach).
+## Automation & Integration
+- **Frontend-Only:** Maintain the application as a pure frontend solution for easy deployment and use with mobile automation tools.
+- **LocalStorage Persistence:** Ensure all user settings and topics are persisted in `localStorage`.
+- **PWA Support:** Follow PWA best practices for offline support and mobile installation.
 
-## State Management
-- Use React hooks (`useState`, `useEffect`, `useRef`).
-- Avoid complex state management libraries (Redux, Zustand) unless absolutely necessary. Keep it simple.
-
-## Refactoring Rules
-- Keep components small and focused.
-- Extract complex logic into custom hooks.
-- Do not change existing functionalities when refactoring.
+## Communication
+- **Clear Summary:** When making changes, provide a concise summary of the modifications.
+- **Action Over Talk:** Prioritize implementation over lengthy explanations.
+- **Respect Intent:** Do not revert user changes or functional improvements.

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Topic } from '../types';
-import { DEFAULT_TOPICS } from '../constants';
+import { DEFAULT_TOPICS } from '../lib/constants';
 
 export function useTopics() {
   const [topics, setTopics] = useState<Topic[]>(() => {

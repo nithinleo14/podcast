@@ -1,5 +1,5 @@
 import { Save } from 'lucide-react';
-import { CustomProvider, PodcastConfig } from '../lib/podcastService';
+import { CustomProvider, PodcastConfig } from '../types';
 
 interface CustomProviderModalProps {
   editingCustom: CustomProvider;

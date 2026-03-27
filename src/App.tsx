@@ -1,255 +1,59 @@
-import { useState, useEffect, useRef } from 'react';
-import { motion, Reorder, useDragControls } from 'motion/react';
+import React, { useState, useEffect, useRef } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { GoogleGenAI, Modality } from "@google/genai";
-import { 
-  Play, 
-  List, 
-  Settings, 
-  Zap, 
-  Clock, 
-  FileText, 
-  Mic, 
-  Search, 
-  PenTool, 
-  Volume2, 
-  Smartphone, 
-  Link, 
-  CheckCircle, 
-  ArrowRight,
-  Copy,
-  Send,
-  Plus,
-  Trash2,
-  GripVertical,
-  ChevronDown,
-  Moon,
-  Sun,
-  Info,
-  AlertCircle,
-  Bell,
-  Download,
-  User,
-  Save,
-  Check,
-  RotateCcw
-} from 'lucide-react';
+
+// Types & Constants
 import { 
   Topic, 
   PodcastConfig, 
   CustomProvider,
-  callLLM,
-  generatePodcastAudio,
   LLMProvider,
   TTSProvider
+} from './types';
+import { 
+  DEFAULT_TOPICS, 
+  VOICES,
+  DEFAULT_CONFIG 
+} from './lib/constants';
+import { AGENT_PROMPTS } from './lib/prompts';
+
+// Utils & Services
+import { 
+  pcmToWav, 
+  formatDate 
+} from './lib/utils';
+import { 
+  callLLM,
+  generatePodcastAudio,
+  testProviderConnection
 } from './lib/podcastService';
-import { TopicItem } from './components/TopicItem';
-import { AgentStatus } from './components/AgentStatus';
+
+// Components
+import { Layout } from './components/Layout';
+import { GeneratePanel } from './components/GeneratePanel';
+import { TopicsPanel } from './components/TopicsPanel';
+import { SettingsPanel } from './components/SettingsPanel';
+import { AutomatePanel } from './components/AutomatePanel';
 import { CustomProviderModal } from './components/CustomProviderModal';
 
-const DEFAULT_TOPICS: Topic[] = [
-  { id: '1', emoji: '🤖', text: 'AI technologies and apps — latest launches and breakthroughs', enabled: true, percentage: 20 },
-  { id: '2', emoji: '₿', text: 'Cryptocurrency — top predictions, trends and news', enabled: true, percentage: 15 },
-  { id: '3', emoji: '📈', text: 'Share market news, tips and investment suggestions', enabled: true, percentage: 20 },
-  { id: '4', emoji: '💻', text: 'Tech industry news and major product updates', enabled: true, percentage: 15 },
-  { id: '5', emoji: '🏢', text: 'Company mergers, acquisitions and big business deals', enabled: true, percentage: 10 },
-  { id: '6', emoji: '🚀', text: 'High-potential emerging companies to watch', enabled: true, percentage: 10 },
-  { id: '7', emoji: '🌍', text: 'Global macro news: crude oil, gold, war, geopolitics affecting markets', enabled: true, percentage: 10 },
-];
-
-const VOICES = ['Zephyr', 'Kore', 'Puck', 'Charon', 'Fenrir'];
-
-function pcmToWav(pcmBase64: string, sampleRate: number = 24000): Blob {
-  const binaryString = atob(pcmBase64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-
-  const buffer = new ArrayBuffer(44 + bytes.length);
-  const view = new DataView(buffer);
-
-  // RIFF identifier
-  view.setUint32(0, 0x52494646, false); // "RIFF"
-  // file length
-  view.setUint32(4, 36 + bytes.length, true);
-  // RIFF type
-  view.setUint32(8, 0x57415645, false); // "WAVE"
-  // format chunk identifier
-  view.setUint32(12, 0x666d7420, false); // "fmt "
-  // format chunk length
-  view.setUint32(16, 16, true);
-  // sample format (raw PCM)
-  view.setUint16(20, 1, true);
-  // channel count
-  view.setUint16(22, 1, true); // Mono
-  // sample rate
-  view.setUint32(24, sampleRate, true);
-  // byte rate (sample rate * block align)
-  view.setUint32(28, sampleRate * 2, true);
-  // block align (channel count * bytes per sample)
-  view.setUint16(32, 2, true);
-  // bits per sample
-  view.setUint16(34, 16, true);
-  // data chunk identifier
-  view.setUint32(36, 0x64617461, false); // "data"
-  // data chunk length
-  view.setUint32(40, bytes.length, true);
-
-  // write the PCM samples
-  for (let i = 0; i < bytes.length; i++) {
-    view.setUint8(44 + i, bytes[i]);
-  }
-
-  return new Blob([buffer], { type: 'audio/wav' });
-}
-
-
 export default function App() {
+  // --- STATE ---
   const [activeTab, setActiveTab] = useState<'generate' | 'topics' | 'settings' | 'guide'>('generate');
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => (localStorage.getItem('dp_theme') as 'dark' | 'light') || 'dark');
   const [topics, setTopics] = useState<Topic[]>(() => {
     const saved = localStorage.getItem('dp_topics');
     if (!saved) return DEFAULT_TOPICS;
-    try {
-      return JSON.parse(saved);
-    } catch {
-      return DEFAULT_TOPICS;
-    }
+    try { return JSON.parse(saved); } catch { return DEFAULT_TOPICS; }
   });
+  
   const [config, setConfig] = useState<PodcastConfig>(() => {
-    const defaults: PodcastConfig = {
-      duration: 10,
-      numHosts: 2,
-      hosts: [
-        { name: 'Arjun', geminiVoice: 'Zephyr', elevenLabsVoice: '', murfVoice: '', audixaVoice: '' },
-        { name: 'Priya', geminiVoice: 'Kore', elevenLabsVoice: '', murfVoice: '', audixaVoice: '' },
-        { name: 'Sameer', geminiVoice: 'Puck', elevenLabsVoice: '', murfVoice: '', audixaVoice: '' }
-      ],
-      podcastName: 'The Daily Brief India',
-      newsFetcherProvider: 'groq',
-      scriptWriterProvider: 'groq',
-      voiceGeneratorProvider: 'gemini-tts',
-      groqKey: '',
-      geminiKey: '',
-      claudeKey: '',
-      openaiKey: '',
-      elevenLabsKey: '',
-      murfKey: '',
-      audixaKey: '',
-      customProviders: [],
-      autoGenerate: true,
-      pwaEnabled: false,
-      pwaTime: '07:00',
-      pwaDays: [1, 2, 3, 4, 5],
-      pwaNotifications: true,
-      automationMethods: ['pwa', 'macrodroid'],
-      userName: 'Nithin',
-      pretext: 'Hey [name]. The podcast topics are as per your suggestions.',
-      autoGenerateDuration: 10,
-      autoDownload: false,
-      whatsappEnabled: false,
-      whatsappNumber: '',
-      whatsappAutoSend: false,
-      whatsappMethod: 'link',
-      whatsappWebhookUrl: '',
-      whatsappApiKey: ''
-    };
     const saved = localStorage.getItem('dp_config');
-    if (!saved) return defaults;
-    try {
-      return { ...defaults, ...JSON.parse(saved) };
-    } catch {
-      return defaults;
-    }
+    if (!saved) return DEFAULT_CONFIG;
+    try { return { ...DEFAULT_CONFIG, ...JSON.parse(saved) }; } catch { return DEFAULT_CONFIG; }
   });
 
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => (localStorage.getItem('dp_theme') as 'dark' | 'light') || 'dark');
   const [notification, setNotification] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
-
-  useEffect(() => {
-    console.log('DEBUG: process.env.GEMINI_API_KEY exists:', !!process.env.GEMINI_API_KEY);
-    if (process.env.GEMINI_API_KEY) {
-      console.log('DEBUG: process.env.GEMINI_API_KEY starts with AIza:', process.env.GEMINI_API_KEY.startsWith('AIza'));
-    }
-    document.documentElement.classList.toggle('light', theme === 'light');
-    localStorage.setItem('dp_theme', theme);
-  }, [theme]);
-
-  const notify = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
-    setNotification({ msg, type });
-    setTimeout(() => setNotification(null), 4000);
-  };
-
-  const [pctMode, setPctMode] = useState(() => localStorage.getItem('dp_pctMode') === '1');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<{ tab: string; show: boolean }>({ tab: '', show: false });
-  const [openSettings, setOpenSettings] = useState<string | null>('providers');
-  const [editingCustom, setEditingCustom] = useState<CustomProvider | null>(null);
-  const [testStatus, setTestStatus] = useState<{ loading: boolean; error?: string; success?: string } | null>(null);
-
-  const handleTestConnection = async (p?: CustomProvider) => {
-    const target = p || editingCustom;
-    if (!target) return;
-    
-    setTestStatus({ loading: true });
-    
-    try {
-      if (!target.url) throw new Error('URL is required');
-      
-      const dummyText = target.type === 'llm' ? 'Hello, are you there?' : 'Hello';
-      let payload;
-      try {
-        payload = JSON.parse(target.payloadTemplate || '{}');
-      } catch (e) {
-        throw new Error('Invalid JSON in Payload Template');
-      }
-
-      const replaceText = (obj: any, val: string): any => {
-        if (typeof obj === 'string') return obj.replace(target.type === 'llm' ? '{{prompt}}' : '{{text}}', val);
-        if (Array.isArray(obj)) return obj.map((o: any) => replaceText(o, val));
-        if (typeof obj === 'object' && obj !== null) {
-          const newObj: any = {};
-          for (const key in obj) newObj[key] = replaceText(obj[key], val);
-          return newObj;
-        }
-        return obj;
-      };
-      const finalPayload = replaceText(payload, dummyText);
-      
-      const headers: any = { 'Content-Type': 'application/json' };
-      if (target.apiKey && target.authHeader) {
-        headers[target.authHeader] = (target.authPrefix || '') + target.apiKey;
-      }
-
-      const res = await fetch(target.url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(finalPayload)
-      });
-
-      if (!res.ok) throw new Error(`HTTP Error: ${res.status} ${res.statusText}`);
-      
-      const data = await res.json();
-      const resolvePath = (obj: any, path: string) => {
-        if (!path) return obj;
-        return path.split(/[.[\]]/).filter(Boolean).reduce((acc, part) => acc && acc[part], obj);
-      };
-      const result = resolvePath(data, target.responsePath || '');
-      
-      if (result) {
-        setTestStatus({ loading: false, success: 'Connection Successful!' });
-        notify('Connection Successful!', 'success');
-      } else {
-        setTestStatus({ loading: false, error: 'Connection OK, but Response Path returned nothing.' });
-        notify('Connection OK, but Response Path returned nothing.', 'error');
-      }
-    } catch (err: any) {
-      setTestStatus({ loading: false, error: err.message });
-      notify(`Connection Failed: ${err.message}`, 'error');
-    }
-  };
-
-  const [isPlayingSample, setIsPlayingSample] = useState<string | null>(null);
   const [logs, setLogs] = useState<{ msg: string; cls?: string }[]>([]);
   const [agentStates, setAgentStates] = useState({ news: '', script: '', voice: '' });
   const [agentMsgs, setAgentMsgs] = useState({ news: 'Waiting...', script: 'Waiting...', voice: 'Waiting...' });
@@ -257,14 +61,70 @@ export default function App() {
   const [whatsappMessage, setWhatsappMessage] = useState('');
   const [audioUrl, setAudioUrl] = useState('');
   const [audioMeta, setAudioMeta] = useState('');
+  const [saveStatus, setSaveStatus] = useState<{ tab: string; show: boolean }>({ tab: '', show: false });
+  const [openSettings, setOpenSettings] = useState<string | null>('providers');
+  const [editingCustom, setEditingCustom] = useState<CustomProvider | null>(null);
+  const [testStatus, setTestStatus] = useState<{ loading: boolean; error?: string; success?: string } | null>(null);
+  const [isPlayingSample, setIsPlayingSample] = useState<string | null>(null);
+
   const audioRef = useRef<HTMLAudioElement>(null);
-  const logboxRef = useRef<HTMLDivElement>(null);
+
+  // --- EFFECTS ---
+  useEffect(() => {
+    document.documentElement.classList.toggle('light', theme === 'light');
+    localStorage.setItem('dp_theme', theme);
+  }, [theme]);
 
   useEffect(() => {
-    if (logboxRef.current) {
-      logboxRef.current.scrollTop = logboxRef.current.scrollHeight;
+    localStorage.setItem('dp_config', JSON.stringify(config));
+  }, [config]);
+
+  useEffect(() => {
+    localStorage.setItem('dp_topics', JSON.stringify(topics));
+  }, [topics]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auto') === '1' && config.autoGenerate) {
+      const today = new Date().toISOString().split('T')[0];
+      if (config.lastGeneratedDate !== today) {
+        handleGenerate(true);
+      } else {
+        notify('Podcast for today already generated.', 'info');
+      }
     }
-  }, [logs]);
+  }, []);
+
+  useEffect(() => {
+    if (!config.pwaEnabled || !config.pwaNotifications) return;
+
+    const interval = setInterval(() => {
+      const now = new Date();
+      const currentDay = now.getDay();
+      const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      
+      if (config.pwaDays.includes(currentDay) && currentTime === config.pwaTime) {
+        const today = new Date().toISOString().split('T')[0];
+        if (config.lastGeneratedDate !== today) {
+          new Notification("🎙️ Pulse Studio", {
+            body: "Time to generate your daily podcast! Tap to start.",
+            icon: "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>"
+          }).onclick = () => {
+            window.focus();
+            handleGenerate();
+          };
+        }
+      }
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [config.pwaEnabled, config.pwaTime, config.pwaNotifications, config.lastGeneratedDate]);
+
+  // --- HANDLERS ---
+  const notify = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setNotification({ msg, type });
+    setTimeout(() => setNotification(null), 4000);
+  };
 
   const addLog = (msg: string, cls: string = '') => {
     setLogs(prev => [...prev, { msg, cls }]);
@@ -278,13 +138,31 @@ export default function App() {
   const handleSave = (tab: string) => {
     if (tab === 'topics') {
       localStorage.setItem('dp_topics', JSON.stringify(topics));
-      localStorage.setItem('dp_pctMode', pctMode ? '1' : '0');
     } else if (tab === 'settings') {
       localStorage.setItem('dp_config', JSON.stringify(config));
     }
     setSaveStatus({ tab, show: true });
     setTimeout(() => setSaveStatus({ tab: '', show: false }), 2000);
     notify('Changes saved successfully', 'success');
+  };
+
+  const handleTestConnection = async (p?: CustomProvider) => {
+    const target = p || editingCustom;
+    if (!target) return;
+    setTestStatus({ loading: true });
+    try {
+      const success = await testProviderConnection(target);
+      if (success) {
+        setTestStatus({ loading: false, success: 'Connection Successful!' });
+        notify('Connection Successful!', 'success');
+      } else {
+        setTestStatus({ loading: false, error: 'Connection failed.' });
+        notify('Connection failed.', 'error');
+      }
+    } catch (err: any) {
+      setTestStatus({ loading: false, error: err.message });
+      notify(`Connection Failed: ${err.message}`, 'error');
+    }
   };
 
   const playVoiceSample = async (voiceName: string) => {
@@ -296,7 +174,7 @@ export default function App() {
       const sysKey = process.env.GEMINI_API_KEY && !placeholders.includes(process.env.GEMINI_API_KEY) ? process.env.GEMINI_API_KEY : null;
       const key = userKey || sysKey;
       
-      if (!key) throw new Error("Gemini API Key is missing or invalid. Please check your settings.");
+      if (!key) throw new Error("Gemini API Key is missing or invalid.");
 
       const geminiAi = new GoogleGenAI({ apiKey: key });
       const response = await geminiAi.models.generateContent({
@@ -339,88 +217,6 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    localStorage.setItem('dp_config', JSON.stringify(config));
-  }, [config]);
-
-  useEffect(() => {
-    localStorage.setItem('dp_topics', JSON.stringify(topics));
-  }, [topics]);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('auto') === '1' && config.autoGenerate) {
-      const today = new Date().toISOString().split('T')[0];
-      if (config.lastGeneratedDate !== today) {
-        handleGenerate(true);
-      } else {
-        notify('Podcast for today already generated.', 'info');
-      }
-    }
-  }, []);
-
-  const downloadAutomationHtml = () => {
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Pulse Studio Automation</title>
-    <meta http-equiv="refresh" content="0; url=${window.location.origin}?auto=1">
-</head>
-<body>
-    <p>Redirecting to Pulse Studio...</p>
-</body>
-</html>`;
-    const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'dailypod-ai.html';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const requestNotificationPermission = async () => {
-    if (!('Notification' in window)) {
-      notify('Your browser does not support notifications.', 'error');
-      return;
-    }
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      notify('Notifications enabled!', 'success');
-      setConfig(prev => ({ ...prev, pwaNotifications: true }));
-    } else {
-      notify('Permission denied for notifications.', 'error');
-    }
-  };
-
-  useEffect(() => {
-    if (!config.pwaEnabled || !config.pwaNotifications) return;
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      const currentDay = now.getDay();
-      const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-      
-      if (config.pwaDays.includes(currentDay) && currentTime === config.pwaTime) {
-        const today = new Date().toISOString().split('T')[0];
-        if (config.lastGeneratedDate !== today) {
-          new Notification("🎙️ Pulse Studio", {
-            body: "Time to generate your daily podcast! Tap to start.",
-            icon: "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>"
-          }).onclick = () => {
-            window.focus();
-            handleGenerate();
-          };
-        }
-      }
-    }, 60000); // Check every minute
-
-    return () => clearInterval(interval);
-  }, [config.pwaEnabled, config.pwaTime, config.pwaNotifications, config.lastGeneratedDate]);
-
   const handleGenerate = async (isAutoRun = false) => {
     const activeTopics = topics.filter(t => t.enabled);
     if (!activeTopics.length) {
@@ -438,76 +234,28 @@ export default function App() {
     setA('script', '', 'Waiting...');
     setA('voice', '', 'Waiting...');
 
-    // Quick check for API keys
-    const checkKey = (provider: string) => {
-      const placeholders = ['MY_GEMINI_API_KEY', 'undefined', 'null', ''];
-      
-      if (provider === 'gemini-flash' || provider === 'gemini-pro' || provider === 'gemini-tts') {
-        const userKey = config.geminiKey && !placeholders.includes(config.geminiKey) ? config.geminiKey : null;
-        const sysKey = process.env.GEMINI_API_KEY && !placeholders.includes(process.env.GEMINI_API_KEY) ? process.env.GEMINI_API_KEY : null;
-        const key = userKey || sysKey;
-        
-        if (!key) return { valid: false, reason: 'missing' };
-        return { valid: true };
-      }
-      
-      const getProviderKey = () => {
-        if (provider === 'groq') return config.groqKey;
-        if (provider === 'claude') return config.claudeKey;
-        if (provider === 'openai') return config.openaiKey;
-        return null;
-      };
-      
-      const pKey = getProviderKey();
-      if (pKey !== null && (!pKey || placeholders.includes(pKey))) {
-        return { valid: false, reason: 'missing' };
-      }
-      
-      return { valid: true };
-    };
-
-    const newsKeyCheck = checkKey(config.newsFetcherProvider);
-    const scriptKeyCheck = checkKey(config.scriptWriterProvider);
-    const voiceKeyCheck = checkKey(config.voiceGeneratorProvider);
-
-    if (!newsKeyCheck.valid || !scriptKeyCheck.valid || !voiceKeyCheck.valid) {
-       const failed = !newsKeyCheck.valid ? { provider: config.newsFetcherProvider, ...newsKeyCheck } : 
-                      (!scriptKeyCheck.valid ? { provider: config.scriptWriterProvider, ...scriptKeyCheck } : { provider: config.voiceGeneratorProvider, ...voiceKeyCheck });
-       
-       const msg = `Error: API Key missing for ${failed.provider}. Please provide it in Settings.`;
-       
-       addLog(msg, 'lerr');
-       notify(msg, 'error');
-       setIsGenerating(false);
-       setActiveTab('settings');
-       setOpenSettings('keys');
-       return;
-    }
-
     try {
       setA('news', 'run', `Searching news using ${config.newsFetcherProvider}...`);
       addLog(`Agent 1 fetching news (${config.newsFetcherProvider})...`, 'lhi');
-      const newsPrompt = `You are a professional news researcher. Today is ${new Date().toDateString()}. Find the LATEST important news for each topic below: ${activeTopics.map(t => t.text).join(', ')}. Provide 3-5 specific stories for each.`;
+      
+      const newsPrompt = AGENT_PROMPTS.newsFetcher(activeTopics.map(t => t.text));
       const newsData = await callLLM(config.newsFetcherProvider, newsPrompt, config);
+      
       setA('news', 'done', '✓ News fetched');
       addLog('News ready: ' + newsData.length + ' chars', 'lok');
 
       setA('script', 'run', `Writing script using ${config.scriptWriterProvider}...`);
       addLog(`Agent 2 writing script (${config.scriptWriterProvider})...`, 'lhi');
       
-      const personalizedPretext = config.pretext.replace(/\[name\]/gi, config.userName);
-      const scriptPrompt = `
-        ${personalizedPretext ? `START THE PODCAST WITH THIS INTRODUCTION: "${personalizedPretext}"` : ''}
-        
-        Write a ${isAutoRun ? config.autoGenerateDuration : config.duration}-minute podcast script for "${config.podcastName}" with ${config.numHosts} hosts. 
-        Use this news: ${newsData}.
-
-        ${config.whatsappEnabled ? `
-        ALSO, write a short, engaging WhatsApp message summarizing this news in a "WhatsApp News" format (use emojis, bullet points, and a catchy headline).
-        
-        IMPORTANT: Separate the podcast script and the WhatsApp message with exactly this separator: ---WHATSAPP---
-        ` : ''}
-      `;
+      const scriptPrompt = AGENT_PROMPTS.scriptWriter({
+        podcastName: config.podcastName,
+        numHosts: config.numHosts,
+        duration: isAutoRun ? config.autoGenerateDuration : config.duration,
+        newsData: newsData,
+        userName: config.userName,
+        pretext: config.pretext,
+        whatsappEnabled: config.whatsappEnabled
+      });
       
       const fullResponse = await callLLM(config.scriptWriterProvider, scriptPrompt, config);
       
@@ -524,7 +272,6 @@ export default function App() {
       setWhatsappMessage(finalWhatsapp);
       setA('script', 'done', '✓ Script ready');
       addLog('Script ready: ' + finalScript.split(' ').length + ' words', 'lok');
-      if (finalWhatsapp) addLog('WhatsApp message generated', 'lok');
 
       setA('voice', 'run', `Generating voices using ${config.voiceGeneratorProvider}...`);
       addLog(`Agent 3 generating audio (${config.voiceGeneratorProvider})...`, 'lhi');
@@ -548,66 +295,62 @@ export default function App() {
       setA('voice', 'done', '✓ Audio ready!');
       addLog('🎉 Podcast complete!', 'lok');
       
-      // Update last generated date
       const today = new Date().toISOString().split('T')[0];
       setConfig(prev => ({ ...prev, lastGeneratedDate: today }));
 
-      // Auto download if triggered by automation or if autoDownload is ON
-      const params = new URLSearchParams(window.location.search);
-      const isAuto = params.get('auto') === '1';
-      
-      if (isAuto || config.autoDownload) {
+      if (isAutoRun || config.autoDownload) {
         const a = document.createElement('a');
         a.href = url;
         a.download = `DailyPod-${today}.mp3`;
         a.click();
-        addLog('Auto-download triggered', 'lok');
       }
 
-      // Auto WhatsApp if enabled
       if (config.whatsappEnabled && config.whatsappAutoSend && finalWhatsapp) {
-        if (config.whatsappMethod === 'webhook' && config.whatsappWebhookUrl) {
-          try {
-            addLog('Auto-sending WhatsApp via Webhook...', 'lhi');
-            await fetch(config.whatsappWebhookUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                message: finalWhatsapp,
-                number: config.whatsappNumber,
-                timestamp: new Date().toISOString()
-              })
-            });
-            addLog('WhatsApp auto-sent via Webhook', 'lok');
-          } catch (err: any) {
-            addLog(`Auto-send Webhook failed: ${err.message}`, 'lerr');
-          }
-        } else if (config.whatsappMethod === 'callmebot' && config.whatsappApiKey && config.whatsappNumber) {
-          try {
-            addLog('Auto-sending to my WhatsApp via CallMeBot...', 'lhi');
-            const encodedMsg = encodeURIComponent(finalWhatsapp);
-            const url = `https://api.callmebot.com/whatsapp.php?phone=${config.whatsappNumber.replace(/\D/g, '')}&text=${encodedMsg}&apikey=${config.whatsappApiKey}`;
-            await fetch(url, { mode: 'no-cors' }); // CallMeBot is a simple GET
-            addLog('WhatsApp sent to my number!', 'lok');
-          } catch (err: any) {
-            addLog(`CallMeBot failed: ${err.message}`, 'lerr');
-          }
-        } else if (config.whatsappNumber) {
-          addLog('Opening WhatsApp window...', 'lhi');
-          const encodedMsg = encodeURIComponent(finalWhatsapp);
-          const waUrl = `https://wa.me/${config.whatsappNumber.replace(/\D/g, '')}?text=${encodedMsg}`;
-          window.open(waUrl, '_blank');
-          addLog('WhatsApp window opened', 'lok');
-        }
+        handleSendWhatsapp(finalWhatsapp);
       }
     } catch (err: any) {
       addLog('Error: ' + err.message, 'lerr');
-      setA('news', agentStates.news === 'run' ? 'fail' : agentStates.news, agentMsgs.news);
-      setA('script', agentStates.script === 'run' ? 'fail' : agentStates.script, agentMsgs.script);
-      setA('voice', agentStates.voice === 'run' ? 'fail' : agentStates.voice, agentMsgs.voice);
+      setA('news', 'fail', 'Failed');
+      setA('script', 'fail', 'Failed');
+      setA('voice', 'fail', 'Failed');
       notify(err.message, 'error');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleSendWhatsapp = async (msgOverride?: string) => {
+    const msg = msgOverride || whatsappMessage;
+    if (!msg) return;
+    
+    const cleanNumber = config.whatsappNumber.replace(/\D/g, '');
+    const encodedMsg = encodeURIComponent(msg);
+
+    if (config.whatsappMethod === 'webhook') {
+      if (!config.whatsappWebhookUrl) return;
+      try {
+        await fetch(config.whatsappWebhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: msg, number: config.whatsappNumber })
+        });
+        notify('WhatsApp sent via Webhook!', 'success');
+      } catch (err: any) {
+        notify(`Webhook failed: ${err.message}`, 'error');
+      }
+    } else if (config.whatsappMethod === 'callmebot') {
+      if (!config.whatsappApiKey || !config.whatsappNumber) return;
+      try {
+        const url = `https://api.callmebot.com/whatsapp.php?phone=${cleanNumber}&text=${encodedMsg}&apikey=${config.whatsappApiKey}`;
+        await fetch(url, { mode: 'no-cors' });
+        notify('WhatsApp sent to your number!', 'success');
+      } catch (err: any) {
+        notify(`CallMeBot failed: ${err.message}`, 'error');
+      }
+    } else {
+      if (!config.whatsappNumber) return;
+      const waUrl = `https://wa.me/${cleanNumber}?text=${encodedMsg}`;
+      window.open(waUrl, '_blank');
     }
   };
 
@@ -621,60 +364,6 @@ export default function App() {
     }
   };
 
-  const handleSendWhatsapp = async () => {
-    if (!whatsappMessage) return;
-    
-    if (config.whatsappMethod === 'webhook') {
-      if (!config.whatsappWebhookUrl) {
-        notify('Webhook URL is missing in Settings.', 'error');
-        return;
-      }
-      try {
-        addLog('Sending WhatsApp via Webhook...', 'lhi');
-        const res = await fetch(config.whatsappWebhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: whatsappMessage,
-            number: config.whatsappNumber,
-            timestamp: new Date().toISOString()
-          })
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        notify('WhatsApp sent via Webhook!', 'success');
-        addLog('WhatsApp sent via Webhook', 'lok');
-      } catch (err: any) {
-        notify(`Webhook failed: ${err.message}`, 'error');
-        addLog(`Webhook failed: ${err.message}`, 'lerr');
-      }
-    } else if (config.whatsappMethod === 'callmebot') {
-      if (!config.whatsappApiKey || !config.whatsappNumber) {
-        notify('API Key or Number missing for CallMeBot.', 'error');
-        return;
-      }
-      try {
-        addLog('Sending to my WhatsApp via CallMeBot...', 'lhi');
-        const encodedMsg = encodeURIComponent(whatsappMessage);
-        const url = `https://api.callmebot.com/whatsapp.php?phone=${config.whatsappNumber.replace(/\D/g, '')}&text=${encodedMsg}&apikey=${config.whatsappApiKey}`;
-        await fetch(url, { mode: 'no-cors' });
-        notify('WhatsApp sent to your number!', 'success');
-        addLog('WhatsApp sent to my number', 'lok');
-      } catch (err: any) {
-        notify(`CallMeBot failed: ${err.message}`, 'error');
-        addLog(`CallMeBot failed: ${err.message}`, 'lerr');
-      }
-    } else {
-      if (!config.whatsappNumber) {
-        notify('WhatsApp number is missing in Settings.', 'error');
-        return;
-      }
-      const encodedMsg = encodeURIComponent(whatsappMessage);
-      const waUrl = `https://wa.me/${config.whatsappNumber.replace(/\D/g, '')}?text=${encodedMsg}`;
-      window.open(waUrl, '_blank');
-      addLog('WhatsApp window opened', 'lok');
-    }
-  };
-
   const downloadAudio = () => {
     if (!audioUrl) return;
     const a = document.createElement('a');
@@ -683,1004 +372,112 @@ export default function App() {
     a.click();
   };
 
-  const resetTopics = () => {
-    if (!confirm('Reset all topics to defaults?')) return;
-    setTopics(DEFAULT_TOPICS);
-    setPctMode(false);
+  const requestNotificationPermission = async () => {
+    if (!('Notification' in window)) return;
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      notify('Notifications enabled!', 'success');
+    }
   };
 
-  const addTopic = (emoji: string, text: string) => {
-    if (!text) return;
-    const id = Math.random().toString(36).substr(2, 9);
-    setTopics(prev => [...prev, { id, emoji: emoji || '📌', text, enabled: true, percentage: 10 }]);
+  const downloadAutomationHtml = () => {
+    const htmlContent = `<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url=${window.location.origin}?auto=1"></head></html>`;
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dailypod-ai.html';
+    a.click();
   };
 
+  // --- RENDER ---
   return (
-    <>
-      <div className="ambient"></div>
-      
+    <Layout 
+      activeTab={activeTab} 
+      setActiveTab={setActiveTab} 
+      isDark={theme === 'dark'} 
+      setIsDark={(dark) => setTheme(dark ? 'dark' : 'light')}
+    >
       {notification && (
         <div className={`toast ${notification.type}`}>
-          {notification.type === 'success' ? <CheckCircle size={14} /> : notification.type === 'error' ? <AlertCircle size={14} /> : <Info size={14} />}
           <span>{notification.msg}</span>
         </div>
       )}
 
-      <div className="page">
-        <button className="theme-toggle" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
+      <AnimatePresence mode="wait">
+        {activeTab === 'generate' && (
+          <motion.div key="generate" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <GeneratePanel 
+              config={config}
+              setConfig={setConfig}
+              isGenerating={isGenerating}
+              handleGenerate={() => handleGenerate()}
+              agentStates={agentStates}
+              agentMsgs={agentMsgs}
+              logs={logs}
+              script={script}
+              whatsappMessage={whatsappMessage}
+              audioUrl={audioUrl}
+              audioMeta={audioMeta}
+              handleCopyWhatsapp={handleCopyWhatsapp}
+              handleSendWhatsapp={() => handleSendWhatsapp()}
+              downloadAudio={downloadAudio}
+            />
+          </motion.div>
+        )}
 
-        <div className="header">
-          <div className="logo-wrap">
-            <div className="logo"><Mic size={24} color="white" /></div>
-            <div className="logo-ping"></div>
-          </div>
-          <h1>Pulse <span className="accent">Studio</span></h1>
-          <p className="tagline">Your personal AI-powered podcast studio</p>
-        </div>
+        {activeTab === 'topics' && (
+          <motion.div key="topics" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <TopicsPanel 
+              topics={topics}
+              setTopics={setTopics}
+              handleSave={() => handleSave('topics')}
+              saveStatus={saveStatus}
+            />
+          </motion.div>
+        )}
 
-        <div className="nav">
-          <div className={`nav-tab ${activeTab === 'generate' ? 'active' : ''}`} onClick={() => setActiveTab('generate')}>
-            <Play className="ni" color={activeTab === 'generate' ? 'var(--amber)' : '#3b82f6'} />
-            <span>Generate</span>
-          </div>
-          <div className={`nav-tab ${activeTab === 'topics' ? 'active' : ''}`} onClick={() => setActiveTab('topics')}>
-            <List className="ni" color={activeTab === 'topics' ? 'var(--amber)' : '#14b8a6'} />
-            <span>Topics</span>
-          </div>
-          <div className={`nav-tab ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
-            <Settings className="ni" color={activeTab === 'settings' ? 'var(--amber)' : '#a78bfa'} />
-            <span>Settings</span>
-          </div>
-          <div className={`nav-tab ${activeTab === 'guide' ? 'active' : ''}`} onClick={() => setActiveTab('guide')}>
-            <Zap className="ni" color={activeTab === 'guide' ? 'var(--amber)' : '#f59e0b'} />
-            <span>Automate</span>
-          </div>
-        </div>
+        {activeTab === 'settings' && (
+          <motion.div key="settings" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <SettingsPanel 
+              config={config}
+              setConfig={setConfig}
+              openSettings={openSettings}
+              setOpenSettings={setOpenSettings}
+              handleSave={() => handleSave('settings')}
+              saveStatus={saveStatus}
+              setEditingCustom={setEditingCustom}
+              handleTestConnection={handleTestConnection}
+              playVoiceSample={playVoiceSample}
+              isPlayingSample={isPlayingSample}
+            />
+          </motion.div>
+        )}
 
-        {/* GENERATE PANEL */}
-        <div className={`panel ${activeTab === 'generate' ? 'show' : ''}`}>
-          <div className="card">
-            <div className="card-head">
-              <div className="ctw">
-                <div className="cicon icon-amber"><Clock size={14} /></div>
-                <div>
-                  <div className="ctitle">Podcast Duration</div>
-                  <div className="csub">Set target length</div>
-                </div>
-              </div>
-            </div>
-            <div className="dur-display">
-              <span className="dur-num">{config.duration}</span>
-              <span className="dur-unit">min</span>
-            </div>
-            <div className="range-container">
-              <input 
-                type="range" 
-                min="0" max="6" 
-                value={[2, 5, 10, 15, 20, 25, 30].indexOf(config.duration)} 
-                step="1" 
-                onChange={(e) => {
-                  const steps = [2, 5, 10, 15, 20, 25, 30];
-                  setConfig({ ...config, duration: steps[parseInt(e.target.value)] });
-                }} 
-              />
-              <div className="range-lines">
-                {[0, 1, 2, 3, 4, 5, 6].map(i => <div key={i} className="range-line"></div>)}
-              </div>
-            </div>
-            <div className="range-marks">
-              <span>2</span><span>5</span><span>10</span><span>15</span><span>20</span><span>25</span><span>30</span>
-            </div>
-          </div>
+        {activeTab === 'guide' && (
+          <motion.div key="automate" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <AutomatePanel 
+              config={config}
+              setConfig={setConfig}
+              requestNotificationPermission={requestNotificationPermission}
+              downloadAutomationHtml={downloadAutomationHtml}
+              notify={notify}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-          <div className="card">
-            <div className="card-head">
-              <div className="ctw">
-                <div className="cicon icon-teal"><List size={14} /></div>
-                <div>
-                  <div className="ctitle">Active Topics</div>
-                  <div className="csub">{topics.filter(t => t.enabled).length} selected</div>
-                </div>
-              </div>
-            </div>
-            <div className="chips">
-              {topics.filter(t => t.enabled).map(t => (
-                <div key={t.id} className="chip">
-                  {t.emoji} {t.text.split(' ').slice(0, 2).join(' ')}…
-                </div>
-              ))}
-              {topics.filter(t => t.enabled).length === 0 && <span className="csub">No topics enabled</span>}
-            </div>
-          </div>
-
-          <button className="btn btn-amber" disabled={isGenerating} onClick={handleGenerate}>
-            {isGenerating ? '⏳ Generating...' : <><Mic size={18} /> Generate Podcast</>}
-          </button>
-
-          {config.autoGenerate && (
-            <div style={{ marginTop: '8px', textAlign: 'center', fontSize: '11px', color: 'var(--accent-amber)', opacity: 0.8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-              <Zap size={10} /> Auto-Generate is ON
-            </div>
-          )}
-          
-          {(isGenerating || logs.length > 0) && (
-            <div className="card" style={{ marginTop: '12px' }}>
-              <div className="card-head">
-                <div className="ctw">
-                  <div className="cicon icon-amber"><Zap size={14} /></div>
-                  <div className="ctitle">Production Status</div>
-                </div>
-              </div>
-              <AgentStatus agentStates={agentStates} agentMsgs={agentMsgs} />
-              <div className="logbox" ref={logboxRef}>
-                {logs.map((l, i) => <div key={i} className={l.cls}>› {l.msg}</div>)}
-              </div>
-            </div>
-          )}
-
-          {audioUrl && (
-            <div className="card" style={{ marginTop: '12px', border: '1.5px solid var(--teal)' }}>
-              <div className="card-head">
-                <div className="ctw">
-                  <div className="cicon" style={{ color: 'var(--teal)' }}><Volume2 size={16} /></div>
-                  <div className="ctitle">Audio Ready</div>
-                </div>
-              </div>
-              <audio ref={audioRef} controls src={audioUrl}></audio>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                <button className="btn btn-teal" style={{ flex: 1 }} onClick={downloadAudio}>
-                  <Download size={16} /> Download MP3
-                </button>
-                {config.whatsappEnabled && whatsappMessage && (
-                  <button className="btn btn-ghost" style={{ flex: 1, border: '1px solid var(--teal)', color: 'var(--teal)' }} onClick={handleSendWhatsapp}>
-                    <Smartphone size={16} /> {config.whatsappMethod === 'webhook' ? 'Send Webhook' : config.whatsappMethod === 'callmebot' ? 'Send to Me' : 'Send WhatsApp'}
-                  </button>
-                )}
-              </div>
-              <div className="csub" style={{ textAlign: 'center', marginTop: '8px' }}>{audioMeta}</div>
-            </div>
-          )}
-
-          {whatsappMessage && config.whatsappEnabled && (
-            <div className="card" style={{ marginTop: '12px' }}>
-              <div className="card-head">
-                <div className="ctw" onClick={() => {
-                  const el = document.getElementById('wa-content');
-                  if (el) el.classList.toggle('hidden');
-                }} style={{ cursor: 'pointer', flex: 1 }}>
-                  <div className="cicon" style={{ color: '#25D366' }}><Smartphone size={14} /></div>
-                  <div className="ctitle">WhatsApp News Message</div>
-                </div>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <button className="btn btn-ghost btn-sm" onClick={handleCopyWhatsapp} title="Copy to Clipboard">
-                    <Copy size={14} />
-                  </button>
-                  <button className="btn btn-ghost btn-sm" onClick={handleSendWhatsapp} title={config.whatsappMethod === 'webhook' ? 'Send via Webhook' : config.whatsappMethod === 'callmebot' ? 'Send to My Phone' : 'Open in WhatsApp'}>
-                    <Send size={14} />
-                  </button>
-                  <ChevronDown size={14} onClick={() => {
-                    const el = document.getElementById('wa-content');
-                    if (el) el.classList.toggle('hidden');
-                  }} style={{ cursor: 'pointer' }} />
-                </div>
-              </div>
-              <div id="wa-content" className="script-box" style={{ whiteSpace: 'pre-wrap', fontSize: '13px', lineHeight: '1.5' }}>
-                {whatsappMessage}
-              </div>
-            </div>
-          )}
-
-          {script && (
-            <div className="card" style={{ marginTop: '12px' }}>
-              <div className="card-head">
-                <div className="ctw">
-                  <div className="cicon icon-purple"><FileText size={14} /></div>
-                  <div className="ctitle">Production Script</div>
-                </div>
-              </div>
-              <div className="script-box">
-                {script.split('\n').filter(l => l.trim()).map((l, i) => {
-                  const hostIndex = config.hosts.findIndex(h => l.startsWith(h.name + ':'));
-                  if (hostIndex !== -1) {
-                    const host = config.hosts[hostIndex];
-                    const cls = hostIndex === 0 ? 'sh1' : hostIndex === 1 ? 'sh2' : 'sh3';
-                    return <div key={i}><span className={cls}>{host.name}:</span>{l.slice(host.name.length + 1)}</div>;
-                  }
-                  return <div key={i}>{l}</div>;
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* TOPICS PANEL */}
-        <div className={`panel ${activeTab === 'topics' ? 'show' : ''}`}>
-          <div className="card">
-            <div className="card-head" style={{ marginBottom: 0 }}>
-              <div className="ctw">
-                <div className="cicon icon-amber"><Clock size={14} /></div>
-                <div>
-                  <div className="ctitle">Time Distribution</div>
-                  <div className="csub">Set % per topic</div>
-                </div>
-              </div>
-              <label className="toggle">
-                <input type="checkbox" checked={pctMode} onChange={(e) => setPctMode(e.target.checked)} />
-                <div className="ttrack"><div className="tthumb"></div></div>
-              </label>
-            </div>
-            {pctMode && (
-              <div style={{ marginTop: '12px' }}>
-                <div className="pct-tot">
-                  <span className="csub">Total allocated</span>
-                  <span className={`ptv ${topics.filter(t => t.enabled).reduce((s, t) => s + t.percentage, 0) === 100 ? 'ok' : 'warn'}`}>
-                    {topics.filter(t => t.enabled).reduce((s, t) => s + t.percentage, 0)}%
-                  </span>
-                </div>
-                <div className="phi">Must equal 100% for best results.</div>
-              </div>
-            )}
-          </div>
-
-          <div className="notice">
-            <Info size={14} style={{ marginRight: '6px', flexShrink: 0 }} />
-            <span><strong>Drag to reorder</strong> — topics are discussed in this order.</span>
-          </div>
-
-          <div className="card">
-            <div className="card-head">
-              <div className="ctw">
-                <div className="cicon icon-teal"><List size={14} /></div>
-                <div className="ctitle">Manage Topics</div>
-              </div>
-              <button className="btn btn-ghost btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '4px' }} onClick={resetTopics}><RotateCcw size={14} /> Reset</button>
-            </div>
-            <div className="topics-list">
-              <Reorder.Group axis="y" values={topics} onReorder={setTopics} style={{ listStyle: 'none', padding: 0 }}>
-                {topics.map((topic, i) => (
-                  <TopicItem 
-                    key={topic.id} 
-                    topic={topic} 
-                    index={i} 
-                    topics={topics} 
-                    setTopics={setTopics} 
-                    pctMode={pctMode} 
-                  />
-                ))}
-              </Reorder.Group>
-            </div>
-            <div className="add-row">
-              <input className="inp ie" type="text" id="newEmoji" placeholder="🌐" maxLength={2} />
-              <input className="inp it" type="text" id="newText" placeholder="Add topic..." onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  const emoji = (document.getElementById('newEmoji') as HTMLInputElement).value;
-                  const text = (document.getElementById('newText') as HTMLInputElement).value;
-                  addTopic(emoji, text);
-                  (document.getElementById('newEmoji') as HTMLInputElement).value = '';
-                  (document.getElementById('newText') as HTMLInputElement).value = '';
-                }
-              }} />
-              <button className="btn btn-ghost btn-sm" style={{ padding: '10px 14px' }} onClick={() => {
-                const emoji = (document.getElementById('newEmoji') as HTMLInputElement).value;
-                const text = (document.getElementById('newText') as HTMLInputElement).value;
-                addTopic(emoji, text);
-                (document.getElementById('newEmoji') as HTMLInputElement).value = '';
-                (document.getElementById('newText') as HTMLInputElement).value = '';
-              }}><Plus size={18} /></button>
-            </div>
-            <button className="btn btn-teal" style={{ marginTop: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }} onClick={() => handleSave('topics')}>
-              {saveStatus.tab === 'topics' ? <><Check size={18} /> Changes Saved</> : <><Save size={18} /> Save Topics</>}
-            </button>
-          </div>
-        </div>
-
-        {/* SETTINGS PANEL */}
-        <div className={`panel ${activeTab === 'settings' ? 'show' : ''}`}>
-          <div className="accordion">
-            <div className={`acc-item ${openSettings === 'providers' ? 'open' : ''}`}>
-              <div className="acc-head" onClick={() => setOpenSettings(openSettings === 'providers' ? null : 'providers')}>
-                <div className="ctw">
-                  <div className="cicon icon-amber"><Zap size={14} /></div>
-                  <div>
-                    <div className="ctitle">AI Providers</div>
-                    <div className="csub">Select engines</div>
-                  </div>
-                </div>
-                <ChevronDown className="acc-chevron" size={16} />
-              </div>
-              <div className="acc-content">
-                <div className="field">
-                  <label>News Fetcher</label>
-                  <select className="inp" value={config.newsFetcherProvider} onChange={(e) => setConfig({ ...config, newsFetcherProvider: e.target.value as LLMProvider })}>
-                    <option value="groq">Groq (Llama 3.3) — Free/BYOK</option>
-                    <option value="gemini-flash">Gemini 3 Flash — Free</option>
-                    <option value="gemini-pro">Gemini 3.1 Pro — Paid</option>
-                    <option value="claude">Claude 3.5 Sonnet — Paid</option>
-                    <option value="openai">GPT-4o — Paid</option>
-                    {config.customProviders.filter(p => p.type === 'llm').map(p => (
-                      <option key={p.id} value={p.id}>{p.name} (Custom)</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="field">
-                  <label>Script Writer</label>
-                  <select className="inp" value={config.scriptWriterProvider} onChange={(e) => setConfig({ ...config, scriptWriterProvider: e.target.value as LLMProvider })}>
-                    <option value="groq">Groq (Llama 3.3) — Free/BYOK</option>
-                    <option value="gemini-flash">Gemini 3 Flash — Free</option>
-                    <option value="gemini-pro">Gemini 3.1 Pro — Paid</option>
-                    <option value="claude">Claude 3.5 Sonnet — Paid</option>
-                    <option value="openai">GPT-4o — Paid</option>
-                    {config.customProviders.filter(p => p.type === 'llm').map(p => (
-                      <option key={p.id} value={p.id}>{p.name} (Custom)</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="field">
-                  <label>Voice Generator</label>
-                  <select className="inp" value={config.voiceGeneratorProvider} onChange={(e) => setConfig({ ...config, voiceGeneratorProvider: e.target.value as TTSProvider })}>
-                    <option value="gemini-tts">Gemini TTS — Free</option>
-                    <option value="elevenlabs">ElevenLabs — Paid</option>
-                    <option value="murf">Murf.ai — Paid</option>
-                    <option value="audixa">Audixa.ai — Paid</option>
-                    {config.customProviders.filter(p => p.type === 'tts').map(p => (
-                      <option key={p.id} value={p.id}>{p.name} (Custom)</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div style={{ marginTop: '16px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <div className="ctitle">Custom Endpoints</div>
-                    <button className="btn btn-ghost btn-sm" onClick={() => {
-                      setEditingCustom({
-                        id: Math.random().toString(36).substr(2, 9),
-                        name: '',
-                        type: 'llm',
-                        url: '',
-                        apiKey: '',
-                        authHeader: 'Authorization',
-                        authPrefix: 'Bearer ',
-                        payloadTemplate: '{\n  "model": "...",\n  "messages": [{"role": "user", "content": "{{prompt}}"}]\n}',
-                        responsePath: 'choices[0].message.content'
-                      });
-                    }}><Plus size={14} /> Add</button>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {config.customProviders.map(p => (
-                      <div key={p.id} className="custom-p-item">
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 600, fontSize: '12px' }}>{p.name}</div>
-                          <div style={{ fontSize: '10px', color: 'var(--text3)' }}>{p.type.toUpperCase()} · {p.url.split('/')[2]}</div>
-                        </div>
-                        <div style={{ display: 'flex', gap: '4px' }}>
-                          <button className="btn btn-ghost btn-sm" title="Test Connection" onClick={() => handleTestConnection(p)}><Zap size={12} /></button>
-                          <button className="btn btn-ghost btn-sm" title="Edit Provider" onClick={() => setEditingCustom(p)}><PenTool size={12} /></button>
-                          <button className="btn btn-ghost btn-sm" title="Delete Provider" onClick={() => setConfig({ ...config, customProviders: config.customProviders.filter(cp => cp.id !== p.id) })}><Trash2 size={12} /></button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className={`acc-item ${openSettings === 'keys' ? 'open' : ''}`}>
-              <div className="acc-head" onClick={() => setOpenSettings(openSettings === 'keys' ? null : 'keys')}>
-                <div className="ctw">
-                  <div className="cicon icon-teal"><Link size={14} /></div>
-                  <div>
-                    <div className="ctitle">API Keys</div>
-                    <div className="csub">Connect services</div>
-                  </div>
-                </div>
-                <ChevronDown className="acc-chevron" size={16} />
-              </div>
-              <div className="acc-content">
-                <div className="field">
-                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span>Gemini API Key</span>
-                    {process.env.GEMINI_API_KEY && (
-                      <span className="badge" style={{ background: 'var(--teal-dim)', color: 'var(--teal)', border: '1px solid rgba(20,184,166,0.2)' }}>
-                        System Provided
-                      </span>
-                    )}
-                  </label>
-                  <input 
-                    className="inp" 
-                    type="password" 
-                    placeholder={process.env.GEMINI_API_KEY ? "Using System Key" : "Enter Gemini Key"} 
-                    value={config.geminiKey} 
-                    onChange={(e) => setConfig({ ...config, geminiKey: e.target.value })} 
-                  />
-                  {process.env.GEMINI_API_KEY && !config.geminiKey && (
-                    <div className="phi" style={{ marginTop: '6px', color: 'var(--teal)' }}>
-                      <CheckCircle size={10} style={{ display: 'inline', marginRight: '4px' }} />
-                      Google AI Studio key is automatically active.
-                    </div>
-                  )}
-                </div>
-                <div className="field">
-                  <label>Groq API Key</label>
-                  <input className="inp" type="password" placeholder="Enter Groq Key" value={config.groqKey} onChange={(e) => setConfig({ ...config, groqKey: e.target.value })} />
-                </div>
-                <div className="field">
-                  <label>Claude API Key</label>
-                  <input className="inp" type="password" placeholder="Enter Claude Key" value={config.claudeKey} onChange={(e) => setConfig({ ...config, claudeKey: e.target.value })} />
-                </div>
-                <div className="field">
-                  <label>OpenAI API Key</label>
-                  <input className="inp" type="password" placeholder="Enter OpenAI Key" value={config.openaiKey} onChange={(e) => setConfig({ ...config, openaiKey: e.target.value })} />
-                </div>
-                <div className="field">
-                  <label>ElevenLabs Key</label>
-                  <input className="inp" type="password" placeholder="Enter ElevenLabs Key" value={config.elevenLabsKey} onChange={(e) => setConfig({ ...config, elevenLabsKey: e.target.value })} />
-                </div>
-                <div className="field">
-                  <label>Murf.ai Key</label>
-                  <input className="inp" type="password" placeholder="Enter Murf Key" value={config.murfKey} onChange={(e) => setConfig({ ...config, murfKey: e.target.value })} />
-                </div>
-                <div className="field">
-                  <label>Audixa.ai Key</label>
-                  <input className="inp" type="password" placeholder="Enter Audixa Key" value={config.audixaKey} onChange={(e) => setConfig({ ...config, audixaKey: e.target.value })} />
-                </div>
-              </div>
-            </div>
-
-            <div className={`acc-item ${openSettings === 'hosts' ? 'open' : ''}`}>
-              <div className="acc-head" onClick={() => setOpenSettings(openSettings === 'hosts' ? null : 'hosts')}>
-                <div className="ctw">
-                  <div className="cicon icon-purple"><Mic size={14} /></div>
-                  <div>
-                    <div className="ctitle">Host Personalities</div>
-                    <div className="csub">Voices & Names</div>
-                  </div>
-                </div>
-                <ChevronDown className="acc-chevron" size={16} />
-              </div>
-              <div className="acc-content">
-                <div className="field">
-                  <label>Number of Hosts</label>
-                  <select className="inp" value={config.numHosts} onChange={(e) => setConfig({ ...config, numHosts: parseInt(e.target.value) })}>
-                    <option value={1}>1 Host (Solo Brief)</option>
-                    <option value={2}>2 Hosts (Conversation)</option>
-                    <option value={3}>3 Hosts (Panel Discussion)</option>
-                  </select>
-                </div>
-                {[...Array(config.numHosts)].map((_, i) => (
-                  <div key={i} className="host-config-card">
-                    <div style={{ fontWeight: 700, fontSize: '12px', marginBottom: '8px', color: 'var(--amber)' }}>Host {i + 1}</div>
-                    <div className="field">
-                      <label>Name</label>
-                      <input className="inp" type="text" value={config.hosts[i].name} onChange={(e) => {
-                        const newHosts = [...config.hosts];
-                        newHosts[i].name = e.target.value;
-                        setConfig({ ...config, hosts: newHosts });
-                      }} />
-                    </div>
-                    
-                    {config.voiceGeneratorProvider === 'gemini-tts' && (
-                      <div className="field">
-                        <label>Gemini Voice</label>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <select className="inp" style={{ flex: 1 }} value={config.hosts[i].geminiVoice} onChange={(e) => {
-                            const newHosts = [...config.hosts];
-                            newHosts[i].geminiVoice = e.target.value;
-                            setConfig({ ...config, hosts: newHosts });
-                          }}>
-                            {VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-                          </select>
-                          <button className={`btn btn-ghost btn-sm ${isPlayingSample === config.hosts[i].geminiVoice ? 'playing' : ''}`} onClick={() => playVoiceSample(config.hosts[i].geminiVoice)}>
-                            <Volume2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {config.voiceGeneratorProvider === 'elevenlabs' && (
-                      <div className="field">
-                        <label>ElevenLabs Voice ID</label>
-                        <input className="inp" type="text" placeholder="Enter Voice ID" value={config.hosts[i].elevenLabsVoice} onChange={(e) => {
-                          const newHosts = [...config.hosts];
-                          newHosts[i].elevenLabsVoice = e.target.value;
-                          setConfig({ ...config, hosts: newHosts });
-                        }} />
-                      </div>
-                    )}
-
-                    {config.voiceGeneratorProvider === 'murf' && (
-                      <div className="field">
-                        <label>Murf Voice ID</label>
-                        <input className="inp" type="text" placeholder="Enter Voice ID" value={config.hosts[i].murfVoice} onChange={(e) => {
-                          const newHosts = [...config.hosts];
-                          newHosts[i].murfVoice = e.target.value;
-                          setConfig({ ...config, hosts: newHosts });
-                        }} />
-                      </div>
-                    )}
-
-                    {config.voiceGeneratorProvider === 'audixa' && (
-                      <div className="field">
-                        <label>Audixa Voice ID</label>
-                        <input className="inp" type="text" placeholder="Enter Voice ID" value={config.hosts[i].audixaVoice} onChange={(e) => {
-                          const newHosts = [...config.hosts];
-                          newHosts[i].audixaVoice = e.target.value;
-                          setConfig({ ...config, hosts: newHosts });
-                        }} />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className={`acc-item ${openSettings === 'personalization' ? 'open' : ''}`}>
-              <div className="acc-head" onClick={() => setOpenSettings(openSettings === 'personalization' ? null : 'personalization')}>
-                <div className="ctw">
-                  <div className="cicon icon-teal"><User size={14} /></div>
-                  <div>
-                    <div className="ctitle">Personalization</div>
-                    <div className="csub">Intro & Greeting</div>
-                  </div>
-                </div>
-                <ChevronDown className="acc-chevron" size={16} />
-              </div>
-              <div className="acc-content">
-                <div className="field">
-                  <label>User Name</label>
-                  <input 
-                    className="inp" 
-                    type="text" 
-                    placeholder="Enter your name" 
-                    value={config.userName} 
-                    onChange={(e) => setConfig({ ...config, userName: e.target.value })} 
-                  />
-                  <div className="phi">Used in greetings (e.g., [name])</div>
-                </div>
-                <div className="field">
-                  <label>Podcast Pretext (Introduction)</label>
-                  <textarea 
-                    className="inp" 
-                    style={{ minHeight: '80px', resize: 'vertical' }}
-                    placeholder="Enter podcast introduction..." 
-                    value={config.pretext} 
-                    onChange={(e) => setConfig({ ...config, pretext: e.target.value })} 
-                  />
-                  <div className="phi">
-                    This text will be added at the start of the script. Use <code>[name]</code> to insert your name.
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className={`acc-item ${openSettings === 'whatsapp' ? 'open' : ''}`}>
-              <div className="acc-head" onClick={() => setOpenSettings(openSettings === 'whatsapp' ? null : 'whatsapp')}>
-                <div className="ctw">
-                  <div className="cicon" style={{ color: '#25D366' }}><Smartphone size={14} /></div>
-                  <div>
-                    <div className="ctitle">WhatsApp Integration</div>
-                    <div className="csub">News sharing settings</div>
-                  </div>
-                </div>
-                <ChevronDown className="acc-chevron" size={16} />
-              </div>
-              <div className="acc-content">
-                <div className="field" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                  <label>Enable WhatsApp Feature</label>
-                  <label className="toggle">
-                    <input 
-                      type="checkbox" 
-                      checked={config.whatsappEnabled} 
-                      onChange={() => setConfig(prev => ({ ...prev, whatsappEnabled: !prev.whatsappEnabled }))} 
-                    />
-                    <div className="ttrack"><div className="tthumb" /></div>
-                  </label>
-                </div>
-                {config.whatsappEnabled && (
-                  <>
-                    <div className="field">
-                      <label>Sending Method</label>
-                      <select 
-                        className="inp" 
-                        value={config.whatsappMethod} 
-                        onChange={(e) => setConfig({ ...config, whatsappMethod: e.target.value as any })}
-                      >
-                        <option value="link">Direct Link (wa.me)</option>
-                        <option value="webhook">Background Webhook (Automation)</option>
-                        <option value="callmebot">CallMeBot (Send to Self)</option>
-                      </select>
-                      <div className="phi">
-                        {config.whatsappMethod === 'link' && 'Opens WhatsApp in a new tab with the message pre-filled.'}
-                        {config.whatsappMethod === 'webhook' && 'Sends message in background to a webhook URL (e.g. MacroDroid/Tasker).'}
-                        {config.whatsappMethod === 'callmebot' && 'Sends message to your phone via CallMeBot API (Free & Background).'}
-                      </div>
-                    </div>
-
-                    {config.whatsappMethod === 'webhook' && (
-                      <div className="field">
-                        <label>Webhook URL</label>
-                        <input 
-                          className="inp" 
-                          type="text" 
-                          placeholder="https://your-webhook-url.com" 
-                          value={config.whatsappWebhookUrl} 
-                          onChange={(e) => setConfig({ ...config, whatsappWebhookUrl: e.target.value })} 
-                        />
-                        <div className="phi">The URL that will receive the POST request with the message.</div>
-                      </div>
-                    )}
-
-                    {config.whatsappMethod === 'callmebot' && (
-                      <div className="field">
-                        <label>CallMeBot API Key</label>
-                        <input 
-                          className="inp" 
-                          type="text" 
-                          placeholder="Enter your API Key" 
-                          value={config.whatsappApiKey} 
-                          onChange={(e) => setConfig({ ...config, whatsappApiKey: e.target.value })} 
-                        />
-                        <div className="phi">Get your key from @CallMeBot_WhatsApp on Telegram/WhatsApp.</div>
-                      </div>
-                    )}
-
-                    <div className="field">
-                      <label>My WhatsApp Number</label>
-                      <input 
-                        className="inp" 
-                        type="text" 
-                        placeholder="e.g. +919876543210" 
-                        value={config.whatsappNumber} 
-                        onChange={(e) => setConfig({ ...config, whatsappNumber: e.target.value })} 
-                      />
-                      <div className="phi">Include country code (e.g. +91). This is where the news will be sent.</div>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-          <button className="btn btn-teal" style={{ marginTop: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }} onClick={() => handleSave('settings')}>
-            {saveStatus.tab === 'settings' ? <><Check size={18} /> Settings Saved</> : <><Save size={18} /> Save Settings</>}
-          </button>
-        </div>
-
-        {/* AUTOMATE PANEL */}
-        <div className={`panel ${activeTab === 'guide' ? 'show' : ''}`}>
-          <div className="app-card" style={{ marginBottom: '16px' }}>
-            <div className="app-name">Pulse Automator</div>
-            <div className="app-desc">Run your podcast studio automatically at your scheduled time using simple mobile apps.</div>
-            <div className="badge"><Link size={10} /> Webhook Ready</div>
-          </div>
-
-          <div className="card" style={{ marginBottom: '16px', border: '1px solid var(--accent-amber-glow)', background: 'rgba(245, 158, 11, 0.05)' }}>
-            <div className="card-head">
-              <div className="ctw">
-                <div className="cicon icon-amber"><Zap size={14} /></div>
-                <div className="ctitle">Global Automation Settings</div>
-              </div>
-            </div>
-            <div className="card-body" style={{ padding: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', background: 'rgba(245, 158, 11, 0.1)', padding: '12px', borderRadius: '12px', border: '1px solid var(--amber-glow)' }}>
-                <div>
-                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--amber)' }}>Auto-Generate on Launch (ON/OFF)</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text2)' }}>Automatically trigger generation when opened via automation URL or HTML file</div>
-                </div>
-                <label className="toggle">
-                  <input 
-                    type="checkbox" 
-                    checked={config.autoGenerate} 
-                    onChange={() => setConfig(prev => ({ ...prev, autoGenerate: !prev.autoGenerate }))} 
-                  />
-                  <div className="ttrack">
-                    <div className="tthumb" />
-                  </div>
-                </label>
-              </div>
-
-              {config.autoGenerate && (
-                <div style={{ background: 'rgba(245, 158, 11, 0.05)', padding: '12px', borderRadius: '12px', border: '1px solid var(--border)', marginBottom: '16px' }}>
-                  <div className="field" style={{ marginBottom: '12px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Auto-Generate Duration (min)</label>
-                    <select className="inp" value={config.autoGenerateDuration} onChange={(e) => setConfig({ ...config, autoGenerateDuration: parseInt(e.target.value) })}>
-                      {[2, 5, 10, 15, 20, 25, 30].map(d => <option key={d} value={d}>{d} min</option>)}
-                    </select>
-                  </div>
-                  
-                  <div className="field" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 600 }}>Auto-Download MP3</div>
-                    <label className="toggle">
-                      <input 
-                        type="checkbox" 
-                        checked={config.autoDownload} 
-                        onChange={() => setConfig(prev => ({ ...prev, autoDownload: !prev.autoDownload }))} 
-                      />
-                      <div className="ttrack"><div className="tthumb" /></div>
-                    </label>
-                  </div>
-
-                  {config.whatsappEnabled && (
-                    <div className="field" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ fontSize: '11px', fontWeight: 600 }}>Auto-Send WhatsApp Message</div>
-                      <label className="toggle">
-                        <input 
-                          type="checkbox" 
-                          checked={config.whatsappAutoSend} 
-                          onChange={() => setConfig(prev => ({ ...prev, whatsappAutoSend: !prev.whatsappAutoSend }))} 
-                        />
-                        <div className="ttrack"><div className="tthumb" /></div>
-                      </label>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '12px' }}>Enable Automation Methods</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {[
-                    { id: 'pwa', name: 'PWA Reminder', icon: <Bell size={12} /> },
-                    { id: 'macrodroid', name: 'MacroDroid', icon: <Smartphone size={12} /> },
-                    { id: 'webhook', name: 'Webhook/URL', icon: <Link size={12} /> },
-                    { id: 'shortcuts', name: 'iOS Shortcuts', icon: <Zap size={12} /> },
-                    { id: 'automate', name: 'Automate App', icon: <Clock size={12} /> }
-                  ].map(m => (
-                    <button 
-                      key={m.id}
-                      className={`btn btn-sm ${config.automationMethods.includes(m.id as any) ? 'btn-teal' : 'btn-ghost'}`}
-                      style={{ fontSize: '10px', padding: '6px 10px' }}
-                      onClick={() => {
-                        const newMethods = config.automationMethods.includes(m.id as any) 
-                          ? config.automationMethods.filter(am => am !== m.id)
-                          : [...config.automationMethods, m.id as any];
-                        setConfig({ ...config, automationMethods: newMethods });
-                      }}
-                    >
-                      {m.icon} {m.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* PWA Section */}
-            {config.automationMethods.includes('pwa') && (
-              <div className="card">
-                <div className="card-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div className="ctw">
-                    <div className="cicon icon-teal"><Bell size={14} /></div>
-                    <div className="ctitle">PWA Daily Reminder</div>
-                  </div>
-                  <label className="toggle">
-                    <input 
-                      type="checkbox" 
-                      checked={config.pwaEnabled} 
-                      onChange={() => {
-                        if (!config.pwaEnabled) requestNotificationPermission();
-                        setConfig(prev => ({ ...prev, pwaEnabled: !prev.pwaEnabled }));
-                      }} 
-                    />
-                    <div className="ttrack">
-                      <div className="tthumb" />
-                    </div>
-                  </label>
-                </div>
-                <div className="card-body" style={{ padding: '12px' }}>
-                  <div className="phi mb-4">Receive a notification to generate your podcast at a set time.</div>
-                  
-                  {config.pwaEnabled && (
-                    <div style={{ background: 'var(--surface2)', padding: '12px', borderRadius: '8px', marginBottom: '16px', border: '1px solid var(--border)' }}>
-                      <div className="field">
-                        <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Reminder Time</label>
-                        <input 
-                          className="inp" 
-                          type="time" 
-                          value={config.pwaTime} 
-                          onChange={(e) => setConfig(prev => ({ ...prev, pwaTime: e.target.value }))} 
-                        />
-                      </div>
-                      
-                      <div className="field" style={{ marginTop: '12px' }}>
-                        <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Active Days</label>
-                        <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
-                            <button 
-                              key={i}
-                              className={`btn btn-sm ${config.pwaDays.includes(i) ? 'btn-teal' : 'btn-ghost'}`}
-                              style={{ width: '32px', height: '32px', padding: 0, fontSize: '11px', flexShrink: 0 }}
-                              onClick={() => {
-                                const newDays = config.pwaDays.includes(i)
-                                  ? config.pwaDays.filter(d => d !== i)
-                                  : [...config.pwaDays, i].sort();
-                                setConfig({ ...config, pwaDays: newDays });
-                              }}
-                            >
-                              {day}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="steps">
-                    <div className="step">
-                      <div className="snum">1</div>
-                      <div className="sdesc">Add to Home Screen from browser menu.</div>
-                    </div>
-                    <div className="step">
-                      <div className="snum">2</div>
-                      <div className="sdesc">Enable the toggle above and set your time.</div>
-                    </div>
-                    <div className="step">
-                      <div className="snum">3</div>
-                      <div className="sdesc">Tap the notification to launch and generate.</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-            {/* MacroDroid Section */}
-            {config.automationMethods.includes('macrodroid') && (
-              <div className="card">
-                <div className="card-head">
-                  <div className="ctw">
-                    <div className="cicon icon-blue"><Smartphone size={14} /></div>
-                    <div className="ctitle">MacroDroid Setup (Android)</div>
-                  </div>
-                </div>
-                <div className="card-body" style={{ padding: '12px' }}>
-                  <div className="phi mb-4">One-time 5-minute setup for fully automated daily briefings.</div>
-                  
-                  <div className="steps">
-                    <div className="step">
-                      <div className="snum">1</div>
-                      <div>
-                        <div className="stitle">Install MacroDroid</div>
-                        <div className="sdesc">Search MacroDroid on Play Store → Install → Open → Allow all permissions.</div>
-                      </div>
-                    </div>
-                    <div className="step">
-                      <div className="snum">2</div>
-                      <div>
-                        <div className="stitle">Choose Your Method</div>
-                        <div className="sdesc" style={{ marginTop: '4px' }}>
-                          <div style={{ marginBottom: '8px' }}>
-                            <b>Option A: Local HTML File</b>
-                            <button onClick={downloadAutomationHtml} className="btn btn-sm btn-ghost" style={{ marginTop: '4px', width: '100%', border: '1px solid var(--border)', fontSize: '10px' }}>
-                              <Download size={12} /> Download Automation HTML
-                            </button>
-                          </div>
-                          <div>
-                            <b>Option B: Webhook URL</b>
-                            <div className="code-box" style={{ marginTop: '4px', fontSize: '9px', padding: '4px', background: 'var(--surface3)', borderRadius: '4px', wordBreak: 'break-all' }}>
-                              {window.location.origin}?auto=1
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="step">
-                      <div className="snum">3</div>
-                      <div>
-                        <div className="stitle">Add Action → Launch Website</div>
-                        <div className="sdesc">In MacroDroid, use "Launch Website" action and paste:</div>
-                        <div className="code-box" style={{ marginTop: '4px', fontSize: '9px', padding: '4px', background: 'var(--surface3)', borderRadius: '4px' }}>
-                          <div style={{ marginBottom: '4px' }}><b>HTML:</b> file:///sdcard/Download/dailypod-ai.html</div>
-                          <div><b>URL:</b> {window.location.origin}?auto=1</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="step">
-                      <div className="snum">4</div>
-                      <div>
-                        <div className="stitle">🎉 Result...</div>
-                        <div className="sdesc">Opens page → {config.autoGenerate ? 'Auto-generates' : 'Wait for manual tap'} → Podcast plays!</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Webhook Section */}
-            {config.automationMethods.includes('webhook') && (
-              <div className="card">
-                <div className="card-head">
-                  <div className="ctw">
-                    <div className="cicon icon-teal"><Link size={14} /></div>
-                    <div className="ctitle">Webhook URL</div>
-                  </div>
-                </div>
-                <div className="card-body" style={{ padding: '12px' }}>
-                  <div className="phi mb-4">Use this URL in any automation app.</div>
-                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', background: 'var(--surface3)', borderRadius: '8px', padding: '6px 10px' }}>
-                    <code style={{ flex: 1, wordBreak: 'break-all', fontSize: '10px', color: '#fcd34d' }}>
-                      {window.location.origin}?auto=1
-                    </code>
-                    <button className="btn-ghost btn-sm" title="Copy URL" style={{ padding: '4px' }} onClick={() => {
-                      navigator.clipboard.writeText(`${window.location.origin}?auto=1`);
-                      notify('Webhook URL copied!', 'success');
-                    }}><Copy size={12} /></button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* iOS Shortcuts Section */}
-            {config.automationMethods.includes('shortcuts') && (
-              <div className="card">
-                <div className="card-head">
-                  <div className="ctw">
-                    <div className="cicon icon-blue"><Zap size={14} /></div>
-                    <div className="ctitle">iOS Shortcuts</div>
-                  </div>
-                </div>
-                <div className="card-body" style={{ padding: '12px' }}>
-                  <div className="steps">
-                    <div className="step">
-                      <div className="snum">1</div>
-                      <div className="sdesc">Add <b>URL</b> action with the Webhook URL.</div>
-                    </div>
-                    <div className="step">
-                      <div className="snum">2</div>
-                      <div className="sdesc">Add <b>Open URLs</b> action.</div>
-                    </div>
-                    <div className="step">
-                      <div className="snum">3</div>
-                      <div className="sdesc">Set Automation to run daily at your time.</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Automate Section */}
-            {config.automationMethods.includes('automate') && (
-              <div className="card">
-                <div className="card-head">
-                  <div className="ctw">
-                    <div className="cicon icon-purple"><Clock size={14} /></div>
-                    <div className="ctitle">Automate (LlamaLab)</div>
-                  </div>
-                </div>
-                <div className="card-body" style={{ padding: '12px' }}>
-                  <div className="steps">
-                    <div className="step">
-                      <div className="snum">1</div>
-                      <div className="sdesc">Add a <b>Time await</b> block.</div>
-                    </div>
-                    <div className="step">
-                      <div className="snum">2</div>
-                      <div className="sdesc">Add a <b>Content view</b> block.</div>
-                    </div>
-                    <div className="step">
-                      <div className="snum">3</div>
-                      <div className="sdesc">Set Content URL to the Webhook URL.</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* CUSTOM PROVIDER MODAL */}
       {editingCustom && (
         <CustomProviderModal
           editingCustom={editingCustom}
           setEditingCustom={setEditingCustom}
           config={config}
           setConfig={setConfig}
-          testStatus={testStatus}
+          testStatus={testStatus as any}
           handleTestConnection={handleTestConnection}
           notify={notify}
         />
       )}
-    </>
+    </Layout>
   );
 }

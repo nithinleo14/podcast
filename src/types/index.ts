@@ -1,4 +1,8 @@
-export interface Host {
+/**
+ * Pulse Studio - Type Definitions
+ */
+
+export interface HostConfig {
   name: string;
   geminiVoice: string;
   elevenLabsVoice: string;
@@ -19,20 +23,20 @@ export interface CustomProvider {
   name: string;
   type: 'llm' | 'tts';
   url: string;
+  apiKey: string;
   authHeader: string;
   authPrefix: string;
-  apiKey: string;
   payloadTemplate: string;
   responsePath: string;
 }
 
-export type LLMProvider = 'groq' | 'gemini-flash' | 'gemini-pro' | 'claude' | 'openai' | 'custom';
-export type TTSProvider = 'gemini-tts' | 'elevenlabs' | 'murf' | 'audixa' | 'custom';
+export type LLMProvider = 'groq' | 'gemini-flash' | 'gemini-pro' | 'claude' | 'openai' | string;
+export type TTSProvider = 'gemini-tts' | 'elevenlabs' | 'murf' | 'audixa' | string;
 
 export interface PodcastConfig {
   duration: number;
   numHosts: number;
-  hosts: Host[];
+  hosts: HostConfig[];
   podcastName: string;
   newsFetcherProvider: LLMProvider;
   scriptWriterProvider: LLMProvider;
@@ -62,4 +66,21 @@ export interface PodcastConfig {
   whatsappWebhookUrl: string;
   whatsappApiKey: string;
   lastGeneratedDate?: string;
+}
+
+export interface AgentState {
+  news: string;
+  script: string;
+  voice: string;
+}
+
+export interface AgentMsg {
+  news: string;
+  script: string;
+  voice: string;
+}
+
+export interface LogEntry {
+  msg: string;
+  cls?: string;
 }

@@ -1,4 +1,8 @@
-import { Topic, Host, PodcastConfig } from './types';
+import { Topic, PodcastConfig } from "../types";
+
+/**
+ * Pulse Studio - Application Constants
+ */
 
 export const DEFAULT_TOPICS: Topic[] = [
   { id: '1', emoji: '🤖', text: 'AI technologies and apps — latest launches and breakthroughs', enabled: true, percentage: 20 },
@@ -11,6 +15,9 @@ export const DEFAULT_TOPICS: Topic[] = [
 ];
 
 export const VOICES = ['Zephyr', 'Kore', 'Puck', 'Charon', 'Fenrir'];
+
+export const APP_NAME = "Pulse Studio";
+export const APP_DESCRIPTION = "Your personal AI-powered podcast studio.";
 
 export const DEFAULT_CONFIG: PodcastConfig = {
   duration: 10,

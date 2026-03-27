@@ -6,9 +6,14 @@ import {
   CustomProvider, 
   PodcastConfig 
 } from "../types";
+import { AGENT_PROMPTS } from "./prompts";
 
-// Note: We create a new instance per request to ensure the latest API key is used
-// from the config or environment.
+/**
+ * Pulse Studio - Core Services
+ * 
+ * This file handles the heavy lifting of communicating with various AI providers.
+ * It abstracts the complexity of different API formats into a unified interface.
+ */
 
 export async function generatePodcastAudio(script: string, config: PodcastConfig) {
   const custom = config.customProviders.find(p => p.id === config.voiceGeneratorProvider);
@@ -16,7 +21,6 @@ export async function generatePodcastAudio(script: string, config: PodcastConfig
   if (custom) {
     // Handle Custom TTS
     const payload = JSON.parse(custom.payloadTemplate || '{}');
-    // Replace {{text}} in payload recursively
     const replaceText = (obj: any): any => {
       if (typeof obj === 'string') return obj.replace('{{text}}', script);
       if (Array.isArray(obj)) return obj.map(replaceText);
@@ -43,7 +47,6 @@ export async function generatePodcastAudio(script: string, config: PodcastConfig
     if (!res.ok) throw new Error(`Custom TTS Error: ${res.statusText}`);
     
     const data = await res.json();
-    // Resolve response path (e.g. "audio.url")
     const resolvePath = (obj: any, path: string) => {
       return path.split(/[.[\]]/).filter(Boolean).reduce((acc, part) => acc && acc[part], obj);
     };
@@ -52,25 +55,22 @@ export async function generatePodcastAudio(script: string, config: PodcastConfig
     if (!audioData) throw new Error("Could not find audio data in custom response");
     
     return {
-      data: audioData, // Expecting base64 or URL depending on provider
-      mimeType: 'audio/mpeg' // Default assumption
+      data: audioData,
+      mimeType: 'audio/mpeg'
     };
   }
 
   if (config.voiceGeneratorProvider === 'gemini-tts') {
-    // Use the Gemini TTS model
     const placeholders = ['MY_GEMINI_API_KEY', 'undefined', 'null', ''];
     const userKey = config.geminiKey && !placeholders.includes(config.geminiKey) ? config.geminiKey : null;
     const sysKey = process.env.GEMINI_API_KEY && !placeholders.includes(process.env.GEMINI_API_KEY) ? process.env.GEMINI_API_KEY : null;
     const key = userKey || sysKey;
     
-    if (!key) {
-      throw new Error("Gemini API Key is missing or invalid for TTS. Please check your settings.");
-    }
+    if (!key) throw new Error("Gemini API Key is missing or invalid for TTS.");
+
     const geminiAi = new GoogleGenAI({ apiKey: key });
-    const hostNames = config.hosts.slice(0, config.numHosts).map(h => h.name).join(', ');
-    const prompt = `TTS the following conversation between ${hostNames}:
-${script}`;
+    const hostNames = config.hosts.slice(0, config.numHosts).map(h => h.name);
+    const prompt = AGENT_PROMPTS.voiceGenerator(hostNames) + "\n\n" + script;
 
     const speakerVoiceConfigs = config.hosts.slice(0, config.numHosts).map(h => ({
       speaker: h.name,
@@ -93,31 +93,20 @@ ${script}`;
     });
 
     const part = response.candidates?.[0]?.content?.parts?.[0];
-    if (!part?.inlineData?.data) {
-      console.error("Gemini TTS Response:", response);
-      throw new Error("Failed to generate audio data from Gemini TTS");
-    }
+    if (!part?.inlineData?.data) throw new Error("Failed to generate audio data from Gemini TTS");
 
     return {
       data: part.inlineData.data,
       mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000'
     };
-  } else if (config.voiceGeneratorProvider === 'elevenlabs') {
-    // Placeholder for ElevenLabs - requires specific voice IDs
-    throw new Error("ElevenLabs integration coming soon. Please use Gemini TTS for now.");
-  } else if (config.voiceGeneratorProvider === 'murf') {
-    throw new Error("Murf.ai integration coming soon. Please use Gemini TTS for now.");
-  } else if (config.voiceGeneratorProvider === 'audixa') {
-    throw new Error("Audixa.ai integration coming soon. Please use Gemini TTS for now.");
   }
   
-  throw new Error("Unsupported voice generator provider");
+  throw new Error(`Unsupported voice generator provider: ${config.voiceGeneratorProvider}`);
 }
 
 export async function callLLM(provider: LLMProvider, prompt: string, config: PodcastConfig) {
   const custom = config.customProviders.find(p => p.id === provider);
   if (custom) {
-    // Handle Custom LLM
     const payload = JSON.parse(custom.payloadTemplate || '{}');
     const replacePrompt = (obj: any): any => {
       if (typeof obj === 'string') return obj.replace('{{prompt}}', prompt);
@@ -258,4 +247,37 @@ export async function callGroq(apiKey: string, prompt: string) {
 
   const data = await res.json();
   return data.choices?.[0]?.message?.content || "";
+}
+
+export async function testProviderConnection(provider: CustomProvider) {
+  try {
+    const payload = JSON.parse(provider.payloadTemplate || '{}');
+    const replaceTest = (obj: any): any => {
+      if (typeof obj === 'string') return obj.replace('{{prompt}}', 'test').replace('{{text}}', 'test');
+      if (Array.isArray(obj)) return obj.map(replaceTest);
+      if (typeof obj === 'object' && obj !== null) {
+        const newObj: any = {};
+        for (const key in obj) newObj[key] = replaceTest(obj[key]);
+        return newObj;
+      }
+      return obj;
+    };
+    const finalPayload = replaceTest(payload);
+
+    const headers: any = { 'Content-Type': 'application/json' };
+    if (provider.apiKey && provider.authHeader) {
+      headers[provider.authHeader] = (provider.authPrefix || '') + provider.apiKey;
+    }
+
+    const res = await fetch(provider.url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(finalPayload)
+    });
+
+    return res.ok;
+  } catch (e) {
+    console.error("Test connection failed", e);
+    return false;
+  }
 }
