@@ -51,6 +51,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
 }) => {
   const logboxRef = useRef<HTMLDivElement>(null);
 
+  const durationMin = 1;
+  const durationMax = 30;
+  const durationTicks = [2, 5, 10, 15, 20, 25, 30];
+  const tickPct = (val: number) => ((val - durationMin) / (durationMax - durationMin)) * 100;
+
   useEffect(() => {
     if (logboxRef.current) {
       logboxRef.current.scrollTop = logboxRef.current.scrollHeight;
@@ -75,7 +80,12 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
         </div>
         <div className="range-container">
           <div className="range-lines">
-            {[...Array(11)].map((_, i) => <div key={i} className="range-line" />)}
+            {durationTicks.map((v) => (
+              <div key={v} className="range-tick" style={{ left: `${tickPct(v)}%` }}>
+                <div className="range-line" />
+                <span className="range-mark">{v}</span>
+              </div>
+            ))}
           </div>
           <input 
             type="range" 
@@ -84,11 +94,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps> = ({
             value={config.duration} 
             onChange={(e) => setConfig({ ...config, duration: parseInt(e.target.value) })} 
           />
-          <div className="range-marks">
-            <span>1m</span>
-            <span>15m</span>
-            <span>30m</span>
-          </div>
         </div>
         <button 
           className="btn btn-amber" 

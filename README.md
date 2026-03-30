@@ -2,6 +2,10 @@
 
 **Pulse Studio** is a high-efficiency news consumption tool that automates the entire podcast production workflow. From researching trending topics to writing conversational scripts and generating high-quality multi-host audio, Pulse Studio provides a professional morning radio show experience personalized to your interests.
 
+## Live Demo
+
+Try the deployed app here: https://aipodcast-pulse-studio.vercel.app/
+
 ## 🚀 Key Features
 
 - **Multi-Agent AI Workflow:** 
